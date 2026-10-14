@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-Милитари-стиль. Профиль, стикеры, история, кнопки статуса заказа.
+Стикер начисляется только при нажатии "Заказ готов".
+10 стикеров → уведомление админу → ручное обнуление + скидка 15% от 35 BYN.
 """
 
 import asyncio, os, sqlite3, logging, traceback
@@ -22,6 +23,9 @@ ADMIN_ID   = int(os.environ.get("ADMIN_ID", "1218585792"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 PORT       = int(os.environ.get("PORT", 8080))
 HOST       = "0.0.0.0"
+
+DISCOUNT_PERCENT = 15
+DISCOUNT_MIN_SUM = 35.0
 
 DB_PATH    = "cloud99.db"
 IMAGES_DIR = Path("images"); IMAGES_DIR.mkdir(exist_ok=True)
@@ -142,8 +146,9 @@ def add_admin(uid, uname):
 
 def get_user_stats(uid):
     with db() as c:
-        orders_count = c.execute("SELECT COUNT(*) FROM orders WHERE user_id=?",
-                                 (uid,)).fetchone()[0]
+        orders_count = c.execute(
+            "SELECT COUNT(*) FROM orders WHERE user_id=? AND status='ready'",
+            (uid,)).fetchone()[0]
         st = c.execute("SELECT count, discount_active FROM stickers WHERE user_id=?",
                        (uid,)).fetchone()
         if st: stickers, discount = st["count"], st["discount_active"]
@@ -152,17 +157,35 @@ def get_user_stats(uid):
                 "discount_active": bool(discount)}
 
 def add_sticker(uid):
+    """Начисляет стикер. Возвращает (новое_количество, достиг_ли_10)."""
     with db() as c:
         st = c.execute("SELECT count FROM stickers WHERE user_id=?", (uid,)).fetchone()
         if not st:
             c.execute("INSERT INTO stickers(user_id,count) VALUES(?,1)", (uid,))
-            c.commit(); return 1
+            c.commit()
+            return 1, False
         count = st["count"] + 1
         if count >= 10:
-            c.execute("UPDATE stickers SET count=0, discount_active=1 WHERE user_id=?",
-                      (uid,)); c.commit(); return 0
+            c.execute("UPDATE stickers SET count=? WHERE user_id=?", (count, uid))
+            c.commit()
+            return count, True
         c.execute("UPDATE stickers SET count=? WHERE user_id=?", (count, uid))
-        c.commit(); return count
+        c.commit()
+        return count, False
+
+def reset_stickers(uid):
+    """Обнуляет стикеры и активирует скидку клиенту."""
+    with db() as c:
+        c.execute("""INSERT INTO stickers(user_id, count, discount_active)
+                     VALUES(?, 0, 1)
+                     ON CONFLICT(user_id) DO UPDATE SET count=0, discount_active=1""",
+                  (uid,))
+        c.commit()
+
+def use_discount(uid):
+    with db() as c:
+        c.execute("UPDATE stickers SET discount_active=0 WHERE user_id=?", (uid,))
+        c.commit()
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp  = Dispatcher()
@@ -204,6 +227,32 @@ async def cmd_admin(m: Message, state: FSMContext):
     await state.clear()
     if not is_admin(m.from_user.id): return await m.answer("Нет доступа.")
     await m.answer("Админ-панель CLOUD99:", reply_markup=admin_menu())
+
+@dp.message(Command("reset_stickers"))
+async def cmd_reset_stickers(m: Message):
+    if not is_admin(m.from_user.id): return
+    parts = m.text.split()
+    if len(parts) < 2:
+        return await m.answer(
+            "Использование: <code>/reset_stickers USER_ID</code>\n"
+            "Обнуляет стикеры и активирует скидку клиенту."
+        )
+    try:
+        uid = int(parts[1])
+    except ValueError:
+        return await m.answer("ID должен быть числом.")
+    reset_stickers(uid)
+    await m.answer(f"✅ Стикеры клиента <code>{uid}</code> обнулены, скидка активирована.")
+    try:
+        await bot.send_message(
+            uid,
+            f"🎉 <b>Поздравляем!</b>\n\n"
+            f"Вы собрали 10 отметок и получаете <b>скидку {DISCOUNT_PERCENT}%</b> "
+            f"на следующий заказ от <b>{DISCOUNT_MIN_SUM:.0f} BYN</b>!\n\n"
+            f"Скидка применится автоматически при оформлении."
+        )
+    except Exception as e:
+        log.warning(f"notify {uid}: {e}")
 
 @dp.message(F.text == "⬅️ Выйти")
 async def admin_exit(m: Message, state: FSMContext):
@@ -322,10 +371,12 @@ async def orders(m: Message):
     if not os_: return await m.answer("Заказов нет.")
     for o in os_[:15]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Заказ готов", callback_data=f"ready:{o['id']}:{o['user_id']}")],
-            [InlineKeyboardButton(text="🚚 Отправил", callback_data=f"shipped:{o['id']}:{o['user_id']}")],
-            [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={o['user_id']}")],
-            [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel:{o['id']}:{o['user_id']}")],
+            [InlineKeyboardButton(text="✅ Заказ готов",
+                                  callback_data=f"ready:{o['id']}:{o['user_id']}")],
+            [InlineKeyboardButton(text="❌ Отклонить",
+                                  callback_data=f"reject:{o['id']}:{o['user_id']}")],
+            [InlineKeyboardButton(text="💬 Написать покупателю",
+                                  url=f"tg://user?id={o['user_id']}")],
         ])
         await m.answer(
             f"<b>Заказ #{o['id']}</b> [{o.get('status','new')}]\n"
@@ -335,51 +386,60 @@ async def orders(m: Message):
             f"🕒 {o['created_at']}",
             reply_markup=kb)
 
-# ---------- КНОПКИ СТАТУСА ЗАКАЗА ----------
+# ---------- КНОПКИ СТАТУСА ----------
 @dp.callback_query(F.data.startswith("ready:"))
 async def order_ready(c: CallbackQuery):
     _, oid, uid = c.data.split(":")
-    update_order_status(int(oid), "ready")
+    oid = int(oid); uid = int(uid)
+    update_order_status(oid, "ready")
+
+    new_count, reached_10 = add_sticker(uid)
+
     try:
         await bot.send_message(
-            int(uid),
+            uid,
             f"✅ <b>Ваш заказ #{oid} готов к выдаче!</b>\n\n"
             f"Можете забрать его. Спасибо за покупку! 🎉"
         )
-        await c.message.edit_reply_markup(reply_markup=None)
-        await c.message.answer(f"✅ Покупатель уведомлён: заказ #{oid} готов.")
     except Exception as e:
-        await c.answer(f"Не удалось: {e}", show_alert=True)
+        log.warning(f"notify client: {e}")
 
-@dp.callback_query(F.data.startswith("shipped:"))
-async def order_shipped(c: CallbackQuery):
+    await c.message.edit_reply_markup(reply_markup=None)
+    await c.message.answer(
+        f"✅ Заказ #{oid} подтверждён. У клиента теперь <b>{new_count}/10</b> стикеров."
+    )
+
+    if reached_10:
+        try:
+            await bot.send_message(
+                ADMIN_ID,
+                f"🎯 <b>Клиент набрал 10 стикеров!</b>\n\n"
+                f"👤 {c.from_user.full_name} (<code>{uid}</code>)\n\n"
+                f"Обнули стикеры командой:\n"
+                f"<code>/reset_stickers {uid}</code>\n\n"
+                f"После этого клиент получит скидку {DISCOUNT_PERCENT}% "
+                f"на заказ от {DISCOUNT_MIN_SUM:.0f} BYN."
+            )
+        except Exception as e:
+            log.warning(f"notify admin: {e}")
+
+@dp.callback_query(F.data.startswith("reject:"))
+async def order_reject(c: CallbackQuery):
     _, oid, uid = c.data.split(":")
-    update_order_status(int(oid), "shipped")
+    oid = int(oid); uid = int(uid)
+    update_order_status(oid, "rejected")
+
     try:
         await bot.send_message(
-            int(uid),
-            f"🚚 <b>Ваш заказ #{oid} отправлен!</b>\n\n"
-            f"Ожидайте доставку. Спасибо за покупку! 🎉"
+            uid,
+            f"❌ <b>Заказ #{oid} отклонён.</b>\n\n"
+            f"Если это ошибка — напишите нам."
         )
-        await c.message.edit_reply_markup(reply_markup=None)
-        await c.message.answer(f"🚚 Покупатель уведомлён: заказ #{oid} отправлен.")
     except Exception as e:
-        await c.answer(f"Не удалось: {e}", show_alert=True)
+        log.warning(f"notify client: {e}")
 
-@dp.callback_query(F.data.startswith("cancel:"))
-async def order_cancel(c: CallbackQuery):
-    _, oid, uid = c.data.split(":")
-    update_order_status(int(oid), "cancelled")
-    try:
-        await bot.send_message(
-            int(uid),
-            f"❌ <b>Ваш заказ #{oid} отменён.</b>\n\n"
-            f"Если это ошибка — напишите нам, разберёмся."
-        )
-        await c.message.edit_reply_markup(reply_markup=None)
-        await c.message.answer(f"❌ Покупатель уведомлён: заказ #{oid} отменён.")
-    except Exception as e:
-        await c.answer(f"Не удалось: {e}", show_alert=True)
+    await c.message.edit_reply_markup(reply_markup=None)
+    await c.message.answer(f"❌ Заказ #{oid} отклонён. Стикер не начислен.")
 
 @dp.error()
 async def global_error(event, exception):
@@ -442,8 +502,7 @@ html,body{margin:0;background:var(--bg);color:var(--text);
 .ph{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);
   display:flex;align-items:center;justify-content:center;color:var(--muted);
   font-size:40px;border:1px solid var(--olive)}
-.card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px;
-  color:var(--text)}
+.card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}
 .card .p{font-size:15px;font-weight:900;color:var(--sand)}
 .btn{border:none;border-radius:8px;padding:11px 14px;font-weight:800;
   font-size:12px;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;
@@ -479,6 +538,9 @@ html,body{margin:0;background:var(--bg);color:var(--text);
   border-top:2px solid var(--olive);display:flex;justify-content:space-between;
   text-transform:uppercase;letter-spacing:1px}
 .total b{color:var(--sand)}
+.discount-line{color:var(--sand);font-size:13px;margin-top:8px;
+  padding:8px;background:var(--olive);border-radius:6px;
+  text-transform:uppercase;letter-spacing:1px;font-weight:800}
 .empty{text-align:center;color:var(--muted);padding:40px 0;font-style:italic}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);
   background:var(--olive);color:var(--sand);padding:12px 22px;border-radius:8px;
@@ -533,6 +595,7 @@ html,body{margin:0;background:var(--bg);color:var(--text);
     <h2>🛒 Корзина</h2>
     <div id="ci"></div>
     <div class="total">Итого: <b id="ct">0.00 BYN</b></div>
+    <div id="discountInfo"></div>
     <button class="btn primary" style="width:100%;padding:15px"
             onclick="checkout()">Оформить заказ</button>
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:8px"
@@ -555,6 +618,10 @@ if (tg) { tg.ready(); tg.expand(); }
 const API = location.origin;
 let CATS = [], PRODUCTS = [], CART = JSON.parse(localStorage.getItem('c99')||'{}');
 let CURRENT_CAT = null;
+let USER_DISCOUNT = false;
+const DISCOUNT_PERCENT = 15;
+const DISCOUNT_MIN_SUM = 35;
+
 function saveCart(){ localStorage.setItem('c99', JSON.stringify(CART)); }
 function money(n){ return n.toFixed(2)+' BYN'; }
 async function api(path, opts){ const r = await fetch(API+path, opts); return r.json(); }
@@ -612,7 +679,24 @@ function updateBadge(){
   b.textContent = n;
 }
 
-function openCart(){
+async function checkDiscount(){
+  const u = tg?.initDataUnsafe?.user;
+  if (!u) return;
+  const res = await api('/api/profile/'+u.id);
+  USER_DISCOUNT = res.stats?.discount_active || false;
+}
+
+function calcTotals(){
+  const items = Object.values(CART);
+  const subtotal = items.reduce((s,i)=>s+i.price*i.qty,0);
+  let discount = 0;
+  const eligible = USER_DISCOUNT && subtotal >= DISCOUNT_MIN_SUM;
+  if (eligible) discount = subtotal * DISCOUNT_PERCENT / 100;
+  return {subtotal, discount, total: subtotal - discount, eligible};
+}
+
+async function openCart(){
+  await checkDiscount();
   const box = document.getElementById('ci');
   const items = Object.values(CART);
   if (!items.length){
@@ -629,8 +713,16 @@ function openCart(){
       </div>
     `).join('');
   }
-  const total = items.reduce((s,i)=>s+i.price*i.qty,0);
+  const {subtotal, discount, total, eligible} = calcTotals();
   document.getElementById('ct').textContent = money(total);
+  const info = document.getElementById('discountInfo');
+  if (USER_DISCOUNT && !eligible && items.length){
+    info.innerHTML = `<div class="discount-line">Скидка 15% активируется при заказе от ${DISCOUNT_MIN_SUM} BYN</div>`;
+  } else if (eligible){
+    info.innerHTML = `<div class="discount-line">🎉 Скидка ${DISCOUNT_PERCENT}%: −${money(discount)}</div>`;
+  } else {
+    info.innerHTML = '';
+  }
   document.getElementById('cart').classList.remove('hidden');
 }
 function closeCart(){ document.getElementById('cart').classList.add('hidden'); }
@@ -645,7 +737,7 @@ async function checkout(){
   const items = Object.values(CART);
   if (!items.length) return toast('Пусто');
   const u = tg?.initDataUnsafe?.user || {id:0, username:'guest'};
-  const total = items.reduce((s,i)=>s+i.price*i.qty,0);
+  const {subtotal, discount, total, eligible} = calcTotals();
   const res = await api('/api/order', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -653,7 +745,10 @@ async function checkout(){
       user_id: u.id,
       username: u.username || u.first_name || 'guest',
       items: items.map(i=>({title:i.title, qty:i.qty, price:i.price})),
-      total
+      subtotal: subtotal,
+      discount: discount,
+      total: total,
+      used_discount: eligible
     })
   });
   if (res.ok){
@@ -670,8 +765,7 @@ function toast(t){
 }
 
 function statusLabel(s){
-  return {'new':'Новый','ready':'Готов','shipped':'Отправлен',
-          'cancelled':'Отменён'}[s] || s;
+  return {'new':'Новый','ready':'Готов','rejected':'Отклонён'}[s] || s;
 }
 
 async function openProfile(){
@@ -709,11 +803,11 @@ async function openProfile(){
       <div class="profile-name">${escape(u.first_name || u.username || 'Гость')}</div>
       <div class="profile-sub">@${escape(u.username || '—')}</div>
       <div class="profile-sub">ID: ${u.id}</div>
-      <div class="profile-sub">Заказов: ${st.orders}</div>
+      <div class="profile-sub">Подтверждённых заказов: ${st.orders}</div>
     </div>
     <div class="profile-card">
-      <div style="font-weight:900;color:var(--sand);text-transform:uppercase;letter-spacing:1px;font-size:13px">10 отметок = скидка</div>
-      ${st.discount_active ? '<div style="color:var(--sand);font-weight:800;margin-top:6px">★ СКИДКА АКТИВНА!</div>' : ''}
+      <div style="font-weight:900;color:var(--sand);text-transform:uppercase;letter-spacing:1px;font-size:13px">10 отметок = скидка 15%</div>
+      ${st.discount_active ? '<div style="color:var(--sand);font-weight:800;margin-top:6px">★ СКИДКА АКТИВНА! (от 35 BYN)</div>' : ''}
       <div class="stickers">${stickersHtml}</div>
     </div>
     <div class="section-title">История заказов</div>
@@ -746,41 +840,45 @@ async def handle_order(req):
     uid = data.get("user_id", 0)
     uname = data.get("username", "guest")
     total = data.get("total", 0)
+    subtotal = data.get("subtotal", total)
+    discount = data.get("discount", 0)
+    used_discount = data.get("used_discount", False)
+
     oid = create_order(uid, uname, items_str, total)
+
+    if used_discount and uid:
+        use_discount(uid)
 
     if uid:
         try:
+            disc_line = f"🎁 Скидка: −{discount:.2f} BYN\n" if discount > 0 else ""
             await bot.send_message(
                 uid,
                 f"✅ <b>Заказ #{oid} принят!</b>\n\n"
                 f"📦 {items_str}\n"
-                f"💰 Сумма: <b>{total:.2f} BYN</b>\n\n"
+                f"💵 Сумма: {subtotal:.2f} BYN\n"
+                f"{disc_line}"
+                f"💰 Итого: <b>{total:.2f} BYN</b>\n\n"
                 f"Мы свяжемся с вами, когда заказ будет готов."
             )
         except Exception as e:
             log.warning(f"notify client {uid}: {e}")
 
-    if uid:
-        new_count = add_sticker(uid)
-        if new_count == 0:
-            try:
-                await bot.send_message(uid, "★ Вы собрали 10 отметок! Скидка активирована.")
-            except Exception:
-                pass
-
     with db() as c:
         admins = [r["user_id"] for r in c.execute("SELECT user_id FROM admins").fetchall()]
 
+    disc_line = f"🎁 Скидка: −{discount:.2f} BYN\n" if discount > 0 else ""
     text = (f"🛒 <b>Новый заказ #{oid}</b>\n"
             f"👤 {uname} (<code>{uid}</code>)\n"
             f"📦 {items_str}\n"
-            f"💰 <b>{total:.2f} BYN</b>")
+            f"{disc_line}"
+            f"💰 <b>{total:.2f} BYN</b>\n\n"
+            f"Стикер начислится после нажатия <b>✅ Заказ готов</b>.")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Заказ готов", callback_data=f"ready:{oid}:{uid}")],
-        [InlineKeyboardButton(text="🚚 Отправил", callback_data=f"shipped:{oid}:{uid}")],
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{oid}:{uid}")],
         [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={uid}")],
-        [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel:{oid}:{uid}")],
     ])
 
     for a in admins:

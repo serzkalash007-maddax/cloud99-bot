@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-Милитари-стиль. Профиль, стикеры, история заказов.
+Милитари-стиль. Профиль, стикеры, история, кнопки статуса заказа.
 """
 
 import asyncio, os, sqlite3, logging, traceback
@@ -114,6 +114,11 @@ def create_order(uid, uname, items, total):
                         (uid, uname, items, total))
         c.commit()
         return cur.lastrowid
+
+def update_order_status(oid, status):
+    with db() as c:
+        c.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
+        c.commit()
 
 def get_orders(uid=None):
     with db() as c:
@@ -316,12 +321,65 @@ async def orders(m: Message):
     os_ = get_orders()
     if not os_: return await m.answer("Заказов нет.")
     for o in os_[:15]:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Заказ готов", callback_data=f"ready:{o['id']}:{o['user_id']}")],
+            [InlineKeyboardButton(text="🚚 Отправил", callback_data=f"shipped:{o['id']}:{o['user_id']}")],
+            [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={o['user_id']}")],
+            [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel:{o['id']}:{o['user_id']}")],
+        ])
         await m.answer(
-            f"<b>Заказ #{o['id']}</b>\n"
+            f"<b>Заказ #{o['id']}</b> [{o.get('status','new')}]\n"
             f"👤 {o['username']} (<code>{o['user_id']}</code>)\n"
             f"📦 {o['items']}\n"
             f"💰 <b>{o['total']:.2f} BYN</b>\n"
-            f"🕒 {o['created_at']}")
+            f"🕒 {o['created_at']}",
+            reply_markup=kb)
+
+# ---------- КНОПКИ СТАТУСА ЗАКАЗА ----------
+@dp.callback_query(F.data.startswith("ready:"))
+async def order_ready(c: CallbackQuery):
+    _, oid, uid = c.data.split(":")
+    update_order_status(int(oid), "ready")
+    try:
+        await bot.send_message(
+            int(uid),
+            f"✅ <b>Ваш заказ #{oid} готов к выдаче!</b>\n\n"
+            f"Можете забрать его. Спасибо за покупку! 🎉"
+        )
+        await c.message.edit_reply_markup(reply_markup=None)
+        await c.message.answer(f"✅ Покупатель уведомлён: заказ #{oid} готов.")
+    except Exception as e:
+        await c.answer(f"Не удалось: {e}", show_alert=True)
+
+@dp.callback_query(F.data.startswith("shipped:"))
+async def order_shipped(c: CallbackQuery):
+    _, oid, uid = c.data.split(":")
+    update_order_status(int(oid), "shipped")
+    try:
+        await bot.send_message(
+            int(uid),
+            f"🚚 <b>Ваш заказ #{oid} отправлен!</b>\n\n"
+            f"Ожидайте доставку. Спасибо за покупку! 🎉"
+        )
+        await c.message.edit_reply_markup(reply_markup=None)
+        await c.message.answer(f"🚚 Покупатель уведомлён: заказ #{oid} отправлен.")
+    except Exception as e:
+        await c.answer(f"Не удалось: {e}", show_alert=True)
+
+@dp.callback_query(F.data.startswith("cancel:"))
+async def order_cancel(c: CallbackQuery):
+    _, oid, uid = c.data.split(":")
+    update_order_status(int(oid), "cancelled")
+    try:
+        await bot.send_message(
+            int(uid),
+            f"❌ <b>Ваш заказ #{oid} отменён.</b>\n\n"
+            f"Если это ошибка — напишите нам, разберёмся."
+        )
+        await c.message.edit_reply_markup(reply_markup=None)
+        await c.message.answer(f"❌ Покупатель уведомлён: заказ #{oid} отменён.")
+    except Exception as e:
+        await c.answer(f"Не удалось: {e}", show_alert=True)
 
 @dp.error()
 async def global_error(event, exception):
@@ -450,6 +508,9 @@ html,body{margin:0;background:var(--bg);color:var(--text);
   border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}
 .order b{color:var(--sand)}
 .order .meta{color:var(--muted);font-size:11px;font-family:monospace}
+.order .status{display:inline-block;padding:2px 8px;border-radius:4px;
+  font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;
+  background:var(--olive);color:var(--sand)}
 </style>
 </head>
 <body>
@@ -608,6 +669,11 @@ function toast(t){
   setTimeout(()=>el.remove(), 1800);
 }
 
+function statusLabel(s){
+  return {'new':'Новый','ready':'Готов','shipped':'Отправлен',
+          'cancelled':'Отменён'}[s] || s;
+}
+
 async function openProfile(){
   const modal = document.getElementById('profile');
   const box = document.getElementById('profileContent');
@@ -628,11 +694,12 @@ async function openProfile(){
                  '<button class="btn primary" style="width:100%;margin-top:12px" onclick="closeProfile()">Начать покупку</button>';
   } else {
     ordersHtml = orders.map(o=>`
-      <div class="
- <b>ЗАКАЗ #${o.id}</b><br>
+      <div class="order">
+        <b>ЗАКАЗ #${o.id}</b><br>
         <span class="meta">${o.created_at}</span><br>
         📦 ${escape(o.items)}<br>
-        💰 <b>${o.total.toFixed(2)} BYN</b>
+        💰 <b>${o.total.toFixed(2)} BYN</b><br>
+        <span class="status">${statusLabel(o.status)}</span>
       </div>
     `).join('');
   }
@@ -677,8 +744,22 @@ async def handle_order(req):
     data = await req.json()
     items_str = "; ".join(f"{i['title']} x{i['qty']}" for i in data["items"])
     uid = data.get("user_id", 0)
-    oid = create_order(uid, data.get("username","guest"),
-                       items_str, data.get("total",0))
+    uname = data.get("username", "guest")
+    total = data.get("total", 0)
+    oid = create_order(uid, uname, items_str, total)
+
+    if uid:
+        try:
+            await bot.send_message(
+                uid,
+                f"✅ <b>Заказ #{oid} принят!</b>\n\n"
+                f"📦 {items_str}\n"
+                f"💰 Сумма: <b>{total:.2f} BYN</b>\n\n"
+                f"Мы свяжемся с вами, когда заказ будет готов."
+            )
+        except Exception as e:
+            log.warning(f"notify client {uid}: {e}")
+
     if uid:
         new_count = add_sticker(uid)
         if new_count == 0:
@@ -686,17 +767,28 @@ async def handle_order(req):
                 await bot.send_message(uid, "★ Вы собрали 10 отметок! Скидка активирована.")
             except Exception:
                 pass
+
     with db() as c:
         admins = [r["user_id"] for r in c.execute("SELECT user_id FROM admins").fetchall()]
+
     text = (f"🛒 <b>Новый заказ #{oid}</b>\n"
-            f"👤 {data.get('username')} (<code>{uid}</code>)\n"
+            f"👤 {uname} (<code>{uid}</code>)\n"
             f"📦 {items_str}\n"
-            f"💰 <b>{data.get('total',0):.2f} BYN</b>")
+            f"💰 <b>{total:.2f} BYN</b>")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Заказ готов", callback_data=f"ready:{oid}:{uid}")],
+        [InlineKeyboardButton(text="🚚 Отправил", callback_data=f"shipped:{oid}:{uid}")],
+        [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={uid}")],
+        [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel:{oid}:{uid}")],
+    ])
+
     for a in admins:
         try:
-            await bot.send_message(a, text)
+            await bot.send_message(a, text, reply_markup=kb)
         except Exception as e:
             log.warning(f"notify {a}: {e}")
+
     return web.json_response({"ok": True, "order_id": oid})
 
 async def handle_profile(req):

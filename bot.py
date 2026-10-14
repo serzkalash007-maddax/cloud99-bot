@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-Один файл. Python 3.10+
-Запуск: python bot.py
+Исправленная версия: без бага add_begin, с /cancel и логированием.
 """
 
-import asyncio, os, sqlite3, logging
+import asyncio, os, sqlite3, logging, traceback
 from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
@@ -30,8 +29,10 @@ HOST       = "0.0.0.0"
 DB_PATH    = "cloud99.db"
 IMAGES_DIR = Path("images"); IMAGES_DIR.mkdir(exist_ok=True)
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s | %(levelname)s | %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 log = logging.getLogger("cloud99")
 
 if not BOT_TOKEN:
@@ -82,6 +83,7 @@ def init_db():
             c.execute("INSERT OR IGNORE INTO categories(title,emoji,sort) VALUES(?,?,?)",
                       (t, e, s))
         c.commit()
+    log.info("DB initialized")
 
 def get_categories():
     with db() as c:
@@ -96,11 +98,6 @@ def get_products(cat_id=None):
         else:
             rows = c.execute("SELECT * FROM products ORDER BY id DESC").fetchall()
         return [dict(r) for r in rows]
-
-def get_product(pid):
-    with db() as c:
-        r = c.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
-        return dict(r) if r else None
 
 def add_product(cat_id, title, desc, price, image):
     with db() as c:
@@ -117,7 +114,8 @@ def update_product(pid, field, value):
 
 def delete_product(pid):
     with db() as c:
-        c.execute("DELETE FROM products WHERE id=?", (pid,)); c.commit()
+        c.execute("DELETE FROM products WHERE id=?", (pid,))
+        c.commit()
 
 def create_order(uid, uname, items, total):
     with db() as c:
@@ -135,16 +133,17 @@ def get_orders(uid=None):
             rows = c.execute("SELECT * FROM orders ORDER BY id DESC").fetchall()
         return [dict(r) for r in rows]
 
-def add_admin(uid, uname):
-    with db() as c:
-        c.execute("INSERT OR IGNORE INTO admins(user_id,username) VALUES(?,?)", (uid, uname))
-        c.commit()
-
 def is_admin(uid):
     if uid == ADMIN_ID:
         return True
     with db() as c:
         return c.execute("SELECT 1 FROM admins WHERE user_id=?", (uid,)).fetchone() is not None
+
+def add_admin(uid, uname):
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO admins(user_id,username) VALUES(?,?)",
+                  (uid, uname or ""))
+        c.commit()
 
 # ============================================================
 #                       БОТ
@@ -167,11 +166,14 @@ def admin_menu():
         [KeyboardButton(text="⬅️ Выйти")]
     ], resize_keyboard=True)
 
+# ---------- /start ----------
 @dp.message(CommandStart())
-async def cmd_start(m: Message):
+async def cmd_start(m: Message, state: FSMContext):
+    log.info(f"/start от {m.from_user.id} @{m.from_user.username}")
+    await state.clear()   # сброс на всякий случай
     u = m.from_user
     if u.id == ADMIN_ID:
-        add_admin(u.id, u.username or "")
+        add_admin(u.id, u.username)
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🛒 Открыть магазин",
                              web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))
@@ -181,66 +183,89 @@ async def cmd_start(m: Message):
         f"Привет, {u.first_name}! Открой магазин кнопкой ниже 👇",
         reply_markup=kb)
 
+# ---------- /cancel ----------
+@dp.message(Command("cancel"))
+async def cmd_cancel(m: Message, state: FSMContext):
+    await state.clear()
+    await m.answer("Отменено. Состояние сброшено.", reply_markup=admin_menu() if is_admin(m.from_user.id) else None)
+    log.info(f"/cancel от {m.from_user.id}")
+
+# ---------- /admin ----------
 @dp.message(Command("admin"))
-async def cmd_admin(m: Message):
+async def cmd_admin(m: Message, state: FSMContext):
+    log.info(f"/admin от {m.from_user.id}")
+    await state.clear()  # важно: сброс залипшего состояния
     if not is_admin(m.from_user.id):
         return await m.answer("Нет доступа.")
     await m.answer("Админ-панель CLOUD99:", reply_markup=admin_menu())
 
 @dp.message(F.text == "⬅️ Выйти")
-async def admin_exit(m: Message):
+async def admin_exit(m: Message, state: FSMContext):
+    await state.clear()
     await m.answer("Ок.", reply_markup=None)
 
+# ---------- ДОБАВЛЕНИЕ ----------
 @dp.message(F.text == "➕ Добавить товар")
-async def add_begin(m: Message, st: FSMContext):
-    if not is_admin(m.from_user.id): return
+async def add_begin(m: Message):
+    """Начало добавления товара. FSM не трогаем здесь — ставим ниже, в callback."""
+    log.info(f"[add] нажал 'Добавить товар' user={m.from_user.id}")
+    if not is_admin(m.from_user.id):
+        log.warning(f"[add] не админ: {m.from_user.id}")
+        return
     cats = get_categories()
+    log.info(f"[add] категорий: {len(cats)}")
+    if not cats:
+        return await m.answer("Нет категорий. Проверь базу.")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{c['emoji']} {c['title']}",
                               callback_data=f"ac:{c['id']}")] for c in cats])
     await m.answer("Категория?", reply_markup=kb)
-    await st.set_state(AddP.cat)
 
-@dp.callback_query(AddP.cat, F.data.startswith("ac:"))
-async def add_cat(c: CallbackQuery, st: FSMContext):
-    await st.update_data(cat=int(c.data.split(":")[1]))
+@dp.callback_query(F.data.startswith("ac:"))
+async def add_cat(c: CallbackQuery, state: FSMContext):
+    cat_id = int(c.data.split(":")[1])
+    log.info(f"[add] выбрана категория {cat_id}")
+    await state.update_data(cat=cat_id)
+    await state.set_state(AddP.title)
     await c.message.edit_text("Название товара:")
-    await st.set_state(AddP.title)
 
 @dp.message(AddP.title)
-async def add_title(m: Message, st: FSMContext):
-    await st.update_data(title=m.text.strip())
+async def add_title(m: Message, state: FSMContext):
+    await state.update_data(title=m.text.strip())
+    await state.set_state(AddP.desc)
     await m.answer("Описание (или «-»):")
-    await st.set_state(AddP.desc)
+    log.info(f"[add] title={m.text}")
 
 @dp.message(AddP.desc)
-async def add_desc(m: Message, st: FSMContext):
-    await st.update_data(desc="" if m.text.strip()=="-" else m.text.strip())
+async def add_desc(m: Message, state: FSMContext):
+    await state.update_data(desc="" if m.text.strip()=="-" else m.text.strip())
+    await state.set_state(AddP.price)
     await m.answer("Цена (число, BYN):")
-    await st.set_state(AddP.price)
 
 @dp.message(AddP.price)
-async def add_price(m: Message, st: FSMContext):
+async def add_price(m: Message, state: FSMContext):
     try:
         p = float(m.text.replace(",", ".").strip())
     except ValueError:
         return await m.answer("Не число. Ещё раз:")
-    await st.update_data(price=p)
+    await state.update_data(price=p)
+    await state.set_state(AddP.photo)
     await m.answer("Фото (или «-»):")
-    await st.set_state(AddP.photo)
 
 @dp.message(AddP.photo, F.photo | F.text)
-async def add_photo(m: Message, st: FSMContext):
+async def add_photo(m: Message, state: FSMContext):
     image = ""
     if m.photo:
         f = await bot.get_file(m.photo[-1].file_id)
         image = f"images/{m.photo[-1].file_id}.jpg"
         await bot.download_file(f.file_path, image)
-    d = await st.get_data()
+    d = await state.get_data()
     add_product(d["cat"], d["title"], d["desc"], d["price"], image)
     await m.answer(f"✅ «{d['title']}» добавлен.")
-    await st.clear()
+    log.info(f"[add] товар сохранён: {d}")
+    await state.clear()
 
+# ---------- РЕДАКТИРОВАНИЕ ----------
 @dp.message(F.text == "✏️ Редактировать")
 async def edit_list(m: Message):
     if not is_admin(m.from_user.id): return
@@ -263,15 +288,15 @@ async def edit_field(c: CallbackQuery):
     await c.message.edit_text("Что меняем?", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("ef:"))
-async def edit_prompt(c: CallbackQuery, st: FSMContext):
+async def edit_prompt(c: CallbackQuery, state: FSMContext):
     _, pid, field = c.data.split(":")
-    await st.update_data(pid=int(pid), field=field)
+    await state.update_data(pid=int(pid), field=field)
+    await state.set_state(EditP.val)
     await c.message.edit_text(f"Новое значение ({field}):")
-    await st.set_state(EditP.val)
 
 @dp.message(EditP.val, F.photo | F.text)
-async def edit_save(m: Message, st: FSMContext):
-    d = await st.get_data()
+async def edit_save(m: Message, state: FSMContext):
+    d = await state.get_data()
     field, pid = d["field"], d["pid"]
     if field == "image":
         if m.photo:
@@ -286,8 +311,9 @@ async def edit_save(m: Message, st: FSMContext):
         val = m.text.strip()
     update_product(pid, field, val)
     await m.answer("✅ Обновлено.")
-    await st.clear()
+    await state.clear()
 
+# ---------- УДАЛЕНИЕ ----------
 @dp.message(F.text == "🗑 Удалить")
 async def del_list(m: Message):
     if not is_admin(m.from_user.id): return
@@ -303,6 +329,7 @@ async def del_do(c: CallbackQuery):
     delete_product(int(c.data.split(":")[1]))
     await c.message.edit_text("🗑 Удалено.")
 
+# ---------- ЗАКАЗЫ ----------
 @dp.message(F.text == "📦 Заказы")
 async def orders(m: Message):
     if not is_admin(m.from_user.id): return
@@ -315,6 +342,20 @@ async def orders(m: Message):
             f"📦 {o['items']}\n"
             f"💰 <b>{o['total']:.2f} BYN</b>\n"
             f"🕒 {o['created_at']}")
+
+# ============================================================
+#                    ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК
+# ============================================================
+@dp.error()
+async def global_error(event, exception):
+    log.error(f"ERROR: {exception}\n{traceback.format_exc()}")
+    try:
+        if hasattr(event, "message") and event.message:
+            await event.message.answer(f"⚠️ Ошибка: <code>{exception}</code>")
+        elif hasattr(event, "message") and event.message:
+            await event.message.answer(f"⚠️ Ошибка: <code>{exception}</code>")
+    except Exception:
+        pass
 
 # ============================================================
 #                    WEBAPP (HTTP-СЕРВЕР)
@@ -448,11 +489,7 @@ let CURRENT_CAT = null;
 
 function saveCart(){ localStorage.setItem('c99', JSON.stringify(CART)); }
 function money(n){ return n.toFixed(2)+' BYN'; }
-
-async function api(path, opts){
-  const r = await fetch(API+path, opts);
-  return r.json();
-}
+async function api(path, opts){ const r = await fetch(API+path, opts); return r.json(); }
 
 async function loadCats(){
   CATS = await api('/api/categories');
@@ -515,10 +552,7 @@ function openCart(){
   } else {
     box.innerHTML = items.map(i=>`
       <div class="ci">
-        <div class="info">
-          <b>${escape(i.title)}</b>
-          <span>${money(i.price)} × ${i.qty}</span>
-        </div>
+        <div class="info"><b>${escape(i.title)}</b><span>${money(i.price)} × ${i.qty}</span></div>
         <div class="qty">
           <button onclick="chQty(${i.id},-1)">−</button>
           <span>${i.qty}</span>
@@ -531,9 +565,7 @@ function openCart(){
   document.getElementById('ct').textContent = money(total);
   document.getElementById('cart').classList.remove('hidden');
 }
-
 function closeCart(){ document.getElementById('cart').classList.add('hidden'); }
-
 function chQty(id,d){
   if (!CART[id]) return;
   CART[id].qty += d;
@@ -560,9 +592,7 @@ async function checkout(){
     CART = {}; saveCart(); updateBadge(); closeCart();
     toast('Заказ #'+res.order_id+' оформлен ✓');
     if (tg) setTimeout(()=>tg.close(), 1200);
-  } else {
-    toast('Ошибка. Попробуй ещё.');
-  }
+  } else { toast('Ошибка. Попробуй ещё.'); }
 }
 
 function toast(t){
@@ -578,12 +608,9 @@ loadCats(); loadProducts(); updateBadge();
 </html>
 """
 
-async def handle_index(req):
-    return web.Response(text=HTML, content_type="text/html")
-
-async def handle_categories(req):
-    return web.json_response(get_categories())
-
+async def handle_index(req):    return web.Response(text=HTML, content_type="text/html")
+async def handle_health(req):   return web.Response(text="ok")
+async def handle_categories(req): return web.json_response(get_categories())
 async def handle_products(req):
     cat = req.query.get("cat")
     return web.json_response(get_products(int(cat) if cat else None))
@@ -613,9 +640,6 @@ async def handle_image(req):
         return web.Response(status=404)
     return web.FileResponse(path)
 
-async def handle_health(req):
-    return web.Response(text="ok")
-
 def build_web():
     app = web.Application()
     app.router.add_get("/", handle_index)
@@ -627,12 +651,10 @@ def build_web():
     return app
 
 # ============================================================
-#                  KEEP-ALIVE (антисон)
+#                  KEEP-ALIVE
 # ============================================================
 async def keep_alive():
-    """Раз в 10 минут стучимся в /health, чтобы Render не усыплял сервис."""
-    if not PUBLIC_URL:
-        return
+    if not PUBLIC_URL: return
     import aiohttp
     url = PUBLIC_URL.rstrip("/") + "/health"
     while True:
@@ -651,16 +673,14 @@ async def main():
     init_db()
     if not PUBLIC_URL:
         log.warning("PUBLIC_URL не задан — WebApp-кнопка не откроется.")
-
     runner = web.AppRunner(build_web())
     await runner.setup()
     site = web.TCPSite(runner, HOST, PORT)
     await site.start()
     log.info(f"WebApp: http://{HOST}:{PORT}")
-
     asyncio.create_task(keep_alive())
-
     await bot.delete_webhook(drop_pending_updates=True)
+    log.info("Bot started, polling...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

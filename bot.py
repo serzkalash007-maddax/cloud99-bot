@@ -17,9 +17,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.client.default import DefaultBotProperties
 
-# ============================================================
-#                        НАСТРОЙКИ
-# ============================================================
 BOT_TOKEN  = os.environ.get("BOT_TOKEN", "")
 ADMIN_ID   = int(os.environ.get("ADMIN_ID", "1218585792"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
@@ -29,18 +26,13 @@ HOST       = "0.0.0.0"
 DB_PATH    = "cloud99.db"
 IMAGES_DIR = Path("images"); IMAGES_DIR.mkdir(exist_ok=True)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("cloud99")
 
 if not BOT_TOKEN:
-    raise SystemExit("BOT_TOKEN не задан в переменных окружения!")
+    raise SystemExit("BOT_TOKEN не задан!")
 
-# ============================================================
-#                       БАЗА ДАННЫХ
-# ============================================================
 def db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -119,8 +111,7 @@ def update_product(pid, field, value):
 
 def delete_product(pid):
     with db() as c:
-        c.execute("DELETE FROM products WHERE id=?", (pid,))
-        c.commit()
+        c.execute("DELETE FROM products WHERE id=?", (pid,)); c.commit()
 
 def create_order(uid, uname, items, total):
     with db() as c:
@@ -150,7 +141,6 @@ def add_admin(uid, uname):
                   (uid, uname or ""))
         c.commit()
 
-# ---- СТИКЕРЫ ----
 def get_user_stats(uid):
     with db() as c:
         orders_count = c.execute(
@@ -163,43 +153,26 @@ def get_user_stats(uid):
             stickers, discount = st["count"], st["discount_active"]
         else:
             stickers, discount = 0, 0
-        return {
-            "orders": orders_count,
-            "stickers": stickers,
-            "discount_active": bool(discount)
-        }
+        return {"orders": orders_count, "stickers": stickers,
+                "discount_active": bool(discount)}
 
 def add_sticker(uid):
-    """Возвращает новое количество стикеров. 0 = скидка активирована."""
     with db() as c:
-        st = c.execute(
-            "SELECT count FROM stickers WHERE user_id=?", (uid,)
-        ).fetchone()
+        st = c.execute("SELECT count FROM stickers WHERE user_id=?", (uid,)).fetchone()
         if not st:
             c.execute("INSERT INTO stickers(user_id,count) VALUES(?,1)", (uid,))
             c.commit()
             return 1
         count = st["count"] + 1
         if count >= 10:
-            c.execute(
-                "UPDATE stickers SET count=0, discount_active=1 WHERE user_id=?",
-                (uid,)
-            )
+            c.execute("UPDATE stickers SET count=0, discount_active=1 WHERE user_id=?",
+                      (uid,))
             c.commit()
             return 0
-        else:
-            c.execute("UPDATE stickers SET count=? WHERE user_id=?", (count, uid))
-            c.commit()
-            return count
-
-def use_discount(uid):
-    with db() as c:
-        c.execute("UPDATE stickers SET discount_active=0 WHERE user_id=?", (uid,))
+        c.execute("UPDATE stickers SET count=? WHERE user_id=?", (count, uid))
         c.commit()
+        return count
 
-# ============================================================
-#                       БОТ
-# ============================================================
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp  = Dispatcher()
 
@@ -218,10 +191,8 @@ def admin_menu():
         [KeyboardButton(text="⬅️ Выйти")]
     ], resize_keyboard=True)
 
-# ---------- /start ----------
 @dp.message(CommandStart())
 async def cmd_start(m: Message, state: FSMContext):
-    log.info(f"/start от {m.from_user.id} @{m.from_user.username}")
     await state.clear()
     u = m.from_user
     if u.id == ADMIN_ID:
@@ -230,22 +201,17 @@ async def cmd_start(m: Message, state: FSMContext):
         InlineKeyboardButton(text="🛒 Открыть магазин",
                              web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))
     ]])
-    await m.answer(
-        f"<b>CLOUD99</b> — магазин\n\n"
-        f"Привет, {u.first_name}! Открой магазин кнопкой ниже 👇",
-        reply_markup=kb)
+    await m.answer(f"<b>CLOUD99</b> — магазин\n\nПривет, {u.first_name}! Открой магазин 👇",
+                   reply_markup=kb)
 
-# ---------- /cancel ----------
 @dp.message(Command("cancel"))
 async def cmd_cancel(m: Message, state: FSMContext):
     await state.clear()
     await m.answer("Отменено.",
                    reply_markup=admin_menu() if is_admin(m.from_user.id) else None)
 
-# ---------- /admin ----------
 @dp.message(Command("admin"))
 async def cmd_admin(m: Message, state: FSMContext):
-    log.info(f"/admin от {m.from_user.id}")
     await state.clear()
     if not is_admin(m.from_user.id):
         return await m.answer("Нет доступа.")
@@ -256,15 +222,11 @@ async def admin_exit(m: Message, state: FSMContext):
     await state.clear()
     await m.answer("Ок.", reply_markup=None)
 
-# ---------- ДОБАВЛЕНИЕ ----------
 @dp.message(F.text == "➕ Добавить товар")
 async def add_begin(m: Message):
-    log.info(f"[add] user={m.from_user.id}")
-    if not is_admin(m.from_user.id):
-        return
+    if not is_admin(m.from_user.id): return
     cats = get_categories()
-    if not cats:
-        return await m.answer("Нет категорий.")
+    if not cats: return await m.answer("Нет категорий.")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{c['emoji']} {c['title']}",
                               callback_data=f"ac:{c['id']}")] for c in cats])
@@ -310,7 +272,6 @@ async def add_photo(m: Message, state: FSMContext):
     await m.answer(f"✅ «{d['title']}» добавлен.")
     await state.clear()
 
-# ---------- РЕДАКТИРОВАНИЕ ----------
 @dp.message(F.text == "✏️ Редактировать")
 async def edit_list(m: Message):
     if not is_admin(m.from_user.id): return
@@ -358,7 +319,6 @@ async def edit_save(m: Message, state: FSMContext):
     await m.answer("✅ Обновлено.")
     await state.clear()
 
-# ---------- УДАЛЕНИЕ ----------
 @dp.message(F.text == "🗑 Удалить")
 async def del_list(m: Message):
     if not is_admin(m.from_user.id): return
@@ -374,7 +334,6 @@ async def del_do(c: CallbackQuery):
     delete_product(int(c.data.split(":")[1]))
     await c.message.edit_text("🗑 Удалено.")
 
-# ---------- ЗАКАЗЫ ----------
 @dp.message(F.text == "📦 Заказы")
 async def orders(m: Message):
     if not is_admin(m.from_user.id): return
@@ -388,14 +347,10 @@ async def orders(m: Message):
             f"💰 <b>{o['total']:.2f} BYN</b>\n"
             f"🕒 {o['created_at']}")
 
-# ---------- ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ----------
 @dp.error()
 async def global_error(event, exception):
     log.error(f"ERROR: {exception}\n{traceback.format_exc()}")
 
-# ============================================================
-#                    WEBAPP (HTTP-СЕРВЕР)
-# ============================================================
 HTML = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -404,112 +359,88 @@ HTML = r"""<!DOCTYPE html>
 <title>CLOUD99</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{
-  --bg:#0f1114; --card:#191c22; --card2:#20242c;
-  --accent:#7c5cff; --accent2:#a48bff;
-  --text:#eef1f6; --muted:#8b93a7;
-  --sd:#0a0c0f; --sl:#252a33; --r:20px;
-}
+:root{--bg:#0f1114;--card:#191c22;--card2:#20242c;--accent:#7c5cff;
+--accent2:#a48bff;--text:#eef1f6;--muted:#8b93a7;--sd:#0a0c0f;--sl:#252a33;--r:20px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--text);
-  font-family:-apple-system,"SF Pro Display",Inter,system-ui,sans-serif;
-  padding-bottom:90px;min-height:100vh}
+font-family:-apple-system,system-ui,sans-serif;padding-bottom:90px;min-height:100vh}
 .topbar{display:flex;justify-content:space-between;align-items:center;
-  padding:16px;position:sticky;top:0;background:rgba(15,17,20,.9);
-  backdrop-filter:blur(12px);z-index:20;border-bottom:1px solid #1c2026}
+padding:16px;position:sticky;top:0;background:rgba(15,17,20,.9);
+backdrop-filter:blur(12px);z-index:20;border-bottom:1px solid #1c2026}
 .logo{font-weight:900;letter-spacing:2px;font-size:20px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+background:linear-gradient(135deg,var(--accent),var(--accent2));
+-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .topbar-right{display:flex;gap:8px;align-items:center}
 .profile-btn{background:var(--card);padding:10px 14px;border-radius:14px;
-  box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);
-  font-weight:700;cursor:pointer;font-size:16px}
+box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);cursor:pointer;font-size:16px}
 .cart-btn{background:var(--card);padding:10px 16px;border-radius:14px;
-  box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);
-  font-weight:700;position:relative;cursor:pointer}
+box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);
+font-weight:700;position:relative;cursor:pointer}
 .cart-btn span{color:var(--accent2)}
-.badge{position:absolute;top:-6px;right:-6px;background:var(--accent);
-  color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;
-  display:flex;align-items:center;justify-content:center;font-weight:900}
+.badge{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;
+border-radius:50%;width:22px;height:22px;font-size:12px;display:flex;
+align-items:center;justify-content:center;font-weight:900}
 .cats{display:flex;gap:10px;overflow-x:auto;padding:16px;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
 .cat{flex:0 0 auto;padding:12px 20px;border-radius:16px;background:var(--card);
-  font-weight:800;font-size:13px;letter-spacing:.5px;cursor:pointer;
-  box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl);
-  transition:.18s;border:none;color:var(--text)}
-.cat.active{background:linear-gradient(135deg,var(--accent),var(--accent2));
-  color:#fff;box-shadow:0 8px 22px rgba(124,92,255,.5)}
+font-weight:800;font-size:13px;cursor:pointer;
+box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl);
+border:none;color:var(--text);transition:.18s}
+.cat.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
 .cat:active{transform:scale(.95)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 16px}
 .card{background:var(--card);border-radius:var(--r);padding:12px;
-  box-shadow:7px 7px 16px var(--sd),-7px -7px 16px var(--sl);
-  display:flex;flex-direction:column;gap:8px;transition:.15s}
-.card:active{transform:scale(.97)}
-.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:16px;
-  background:var(--card2)}
+box-shadow:7px 7px 16px var(--sd),-7px -7px 16px var(--sl);
+display:flex;flex-direction:column;gap:8px}
+.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:16px;background:var(--card2)}
 .ph{width:100%;aspect-ratio:1/1;border-radius:16px;background:var(--card2);
-  display:flex;align-items:center;justify-content:center;color:var(--muted);
-  font-size:40px}
+display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:40px}
 .card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}
 .card .p{font-size:16px;font-weight:900;color:var(--accent2)}
 .btn{border:none;border-radius:16px;padding:11px 14px;font-weight:800;
-  font-size:13px;cursor:pointer;transition:.15s;letter-spacing:.3px;
-  font-family:inherit}
-.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));
-  color:#fff;box-shadow:0 6px 16px rgba(124,92,255,.45),
-  inset 0 1px 0 rgba(255,255,255,.3)}
-.btn.primary:active{transform:translateY(2px);
-  box-shadow:0 2px 8px rgba(124,92,255,.4)}
+font-size:13px;cursor:pointer;font-family:inherit}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+box-shadow:0 6px 16px rgba(124,92,255,.45)}
 .btn.ghost{background:var(--card);color:var(--text);
-  box-shadow:4px 4px 10px var(--sd),-4px -4px 10px var(--sl)}
-.btn.ghost:active{transform:scale(.97)}
+box-shadow:4px 4px 10px var(--sd),-4px -4px 10px var(--sl)}
 .add{margin-top:auto}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;
-  align-items:flex-end;justify-content:center;z-index:100;
-  backdrop-filter:blur(8px);animation:fade .2s}
+align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(8px)}
 .modal.hidden{display:none}
-@keyframes fade{from{opacity:0}to{opacity:1}}
 .sheet{background:var(--card);border-radius:28px 28px 0 0;padding:22px;
-  width:100%;max-height:85vh;overflow-y:auto;
-  box-shadow:0 -12px 40px rgba(0,0,0,.7);animation:up .25s}
-@keyframes up{from{transform:translateY(40px)}to{transform:translateY(0)}}
+width:100%;max-height:85vh;overflow-y:auto}
 .sheet h2{margin:0 0 16px;font-size:20px}
 .ci{display:flex;justify-content:space-between;align-items:center;
-  padding:12px 0;border-bottom:1px solid #262b34;gap:10px}
-.ci .info{flex:1;min-width:0}
-.ci .info b{display:block;font-size:13px;line-height:1.3}
+padding:12px 0;border-bottom:1px solid #262b34;gap:10px}
+.ci .info{flex:1}
+.ci .info b{display:block;font-size:13px}
 .ci .info span{font-size:12px;color:var(--muted)}
 .qty{display:flex;gap:6px;align-items:center}
 .qty button{width:30px;height:30px;border-radius:10px;border:none;
-  background:var(--card2);color:#fff;font-size:16px;font-weight:900;
-  cursor:pointer}
-.qty button:active{transform:scale(.9)}
+background:var(--card2);color:#fff;font-size:16px;font-weight:900;cursor:pointer}
 .qty span{min-width:20px;text-align:center;font-weight:800}
-.total{font-size:18px;margin:18px 0;padding-top:16px;
-  border-top:2px solid #262b34;display:flex;justify-content:space-between}
+.total{font-size:18px;margin:18px 0;padding-top:16px;border-top:2px solid #262b34;
+display:flex;justify-content:space-between}
 .total b{color:var(--accent2)}
 .empty{text-align:center;color:var(--muted);padding:40px 0}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);
-  background:var(--accent);color:#fff;padding:12px 22px;border-radius:14px;
-  font-weight:700;z-index:200;animation:fade .2s;
-  box-shadow:0 8px 24px rgba(124,92,255,.5)}
+background:var(--accent);color:#fff;padding:12px 22px;border-radius:14px;
+font-weight:700;z-index:200}
 .profile-card{background:var(--card2);border-radius:var(--r);padding:18px;
-  box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl);margin-bottom:14px}
+box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl);margin-bottom:14px}
 .avatar{width:64px;height:64px;border-radius:20px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  display:flex;align-items:center;justify-content:center;font-size:28px;
-  font-weight:900;color:#fff;margin-bottom:12px}
+background:linear-gradient(135deg,var(--accent),var(--accent2));
+display:flex;align-items:center;justify-content:center;font-size:28px;
+font-weight:900;color:#fff;margin-bottom:12px}
 .profile-name{font-size:18px;font-weight:900;margin-bottom:4px}
 .profile-sub{color:var(--muted);font-size:13px;margin-bottom:2px}
 .stickers{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .sticker{width:44px;height:44px;border-radius:50%;background:var(--card);
-  display:flex;align-items:center;justify-content:center;font-size:20px;
-  box-shadow:inset 3px 3px 8px var(--sd),inset -3px -3px 8px var(--sl)}
-.sticker.filled{background:linear-gradient(135deg,var(--accent),var(--accent2));
-  color:#fff}
+display:flex;align-items:center;justify-content:center;font-size:20px;
+box-shadow:inset 3px 3px 8px var(--sd),inset -3px -3px 8px var(--sl)}
+.sticker.filled{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
 .section-title{font-size:16px;font-weight:900;margin:20px 0 10px}
-.order{background:var(--card2);border-radius:16px;padding:14px;margin-bottom:10px;
-  box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl)}
+.order{background:var(--card2);border-radius:16px;padding:14px;margin-bottom:10px}
 .order b{color:var(--accent2)}
 .order .meta{color:var(--muted);font-size:12px}
 </style>
@@ -553,11 +484,9 @@ html,body{margin:0;background:var(--bg);color:var(--text);
 <script>
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
-
 const API = location.origin;
 let CATS = [], PRODUCTS = [], CART = JSON.parse(localStorage.getItem('c99')||'{}');
 let CURRENT_CAT = null;
-
 function saveCart(){ localStorage.setItem('c99', JSON.stringify(CART)); }
 function money(n){ return n.toFixed(2)+' BYN'; }
 async function api(path, opts){ const r = await fetch(API+path, opts); return r.json(); }
@@ -676,4 +605,146 @@ async function openProfile(){
   const modal = document.getElementById('profile');
   const box = document.getElementById('profileContent');
   modal.classList.remove('hidden');
-  box.innerHTML = 'Загрузка...
+  box.innerHTML = 'Загрузка...';
+  const u = tg?.initDataUnsafe?.user || {id:0, username:'guest', first_name:'Гость'};
+  const res = await api('/api/profile/'+u.id);
+  const orders = res.orders || [];
+  const st = res.stats || {orders:0, stickers:0, discount_active:false};
+  const initial = (u.first_name || u.username || 'C')[0].toUpperCase();
+  let stickersHtml = '';
+  for (let i = 0; i < 10; i++){
+    stickersHtml += `<div class="sticker${i < st.stickers ? ' filled' : ''}">${i < st.stickers ? '⭐' : ''}</div>`;
+  }
+  let ordersHtml = '';
+  if (!orders.length){
+    ordersHtml = '<div class="empty">У вас пока нет заказов</div>' +
+                 '<button class="btn primary" style="width:100%;margin-top:12px" onclick="closeProfile()">Начать покупку</button>';
+  } else {
+    ordersHtml = orders.map(o=>`
+      <div class="order">
+        <b>Заказ #${o.id}</b><br>
+        <span class="meta">${o.created_at}</span><br>
+        📦 ${escape(o.items)}<br>
+        💰 <b>${o.total.toFixed(2)} BYN</b>
+      </div>
+    `).join('');
+  }
+  box.innerHTML = `
+    <div class="profile-card">
+      <div class="avatar">${initial}</div>
+      <div class="profile-name">${escape(u.first_name || u.username || 'Гость')}</div>
+      <div class="profile-sub">@${escape(u.username || '—')}</div>
+      <div class="profile-sub">ID: ${u.id}</div>
+      <div class="profile-sub">Заказов: ${st.orders}</div>
+    </div>
+    <div class="profile-card">
+      <div style="font-weight:900">Собери 10 стикеров и получи скидку</div>
+      ${st.discount_active ? '<div style="color:var(--accent2);font-weight:800;margin-top:6px">🎁 Скидка активна!</div>' : ''}
+      <div class="stickers">${stickersHtml}</div>
+    </div>
+    <div class="section-title">История заказов</div>
+    ${ordersHtml}
+  `;
+}
+function closeProfile(){ document.getElementById('profile').classList.add('hidden'); }
+
+loadCats(); loadProducts(); updateBadge();
+</script>
+</body>
+</html>
+"""async def handle_index(req):
+    return web.Response(text=HTML, content_type="text/html")
+
+async def handle_health(req):
+    return web.Response(text="ok")
+
+async def handle_categories(req):
+    return web.json_response(get_categories())
+
+async def handle_products(req):
+    cat = req.query.get("cat")
+    return web.json_response(get_products(int(cat) if cat else None))
+
+async def handle_order(req):
+    data = await req.json()
+    items_str = "; ".join(f"{i['title']} x{i['qty']}" for i in data["items"])
+    uid = data.get("user_id", 0)
+    oid = create_order(uid, data.get("username","guest"),
+                       items_str, data.get("total",0))
+    if uid:
+        new_count = add_sticker(uid)
+        if new_count == 0:
+            try:
+                await bot.send_message(uid, "🎉 Вы собрали 10 стикеров! Скидка активирована.")
+            except Exception:
+                pass
+    with db() as c:
+        admins = [r["user_id"] for r in c.execute("SELECT user_id FROM admins").fetchall()]
+    text = (f"🛒 <b>Новый заказ #{oid}</b>\n"
+            f"👤 {data.get('username')} (<code>{uid}</code>)\n"
+            f"📦 {items_str}\n"
+            f"💰 <b>{data.get('total',0):.2f} BYN</b>")
+    for a in admins:
+        try:
+            await bot.send_message(a, text)
+        except Exception as e:
+            log.warning(f"notify {a}: {e}")
+    return web.json_response({"ok": True, "order_id": oid})
+
+async def handle_profile(req):
+    uid = int(req.match_info["uid"])
+    orders = get_orders(uid)
+    stats = get_user_stats(uid)
+    return web.json_response({"orders": orders, "stats": stats})
+
+async def handle_image(req):
+    name = req.match_info["name"]
+    path = IMAGES_DIR / name
+    if not path.exists():
+        return web.Response(status=404)
+    return web.FileResponse(path)
+
+def build_web():
+    app = web.Application()
+    app.router.add_get("/", handle_index)
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/categories", handle_categories)
+    app.router.add_get("/api/products", handle_products)
+    app.router.add_post("/api/order", handle_order)
+    app.router.add_get("/api/profile/{uid}", handle_profile)
+    app.router.add_get("/images/{name}", handle_image)
+    return app
+
+async def keep_alive():
+    if not PUBLIC_URL:
+        return
+    import aiohttp
+    url = PUBLIC_URL.rstrip("/") + "/health"
+    while True:
+        await asyncio.sleep(600)
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, timeout=20) as r:
+                    log.info(f"keep-alive: {r.status}")
+        except Exception as e:
+            log.warning(f"keep-alive error: {e}")
+
+async def main():
+    init_db()
+    if not PUBLIC_URL:
+        log.warning("PUBLIC_URL не задан — WebApp-кнопка не откроется.")
+    runner = web.AppRunner(build_web())
+    await runner.setup()
+    site = web.TCPSite(runner, HOST, PORT)
+    await site.start()
+    log.info(f"WebApp: http://{HOST}:{PORT}")
+    asyncio.create_task(keep_alive())
+    await bot.delete_webhook(drop_pending_updates=True)
+    log.info("Bot started, polling...")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        log.info("Остановлено.")

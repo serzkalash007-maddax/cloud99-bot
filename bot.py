@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-Профиль, стикеры, история заказов.
+Милитари-стиль. Профиль, стикеры, история заказов.
 """
 
 import asyncio, os, sqlite3, logging, traceback
@@ -29,9 +29,7 @@ IMAGES_DIR = Path("images"); IMAGES_DIR.mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("cloud99")
-
-if not BOT_TOKEN:
-    raise SystemExit("BOT_TOKEN не задан!")
+if not BOT_TOKEN: raise SystemExit("BOT_TOKEN не задан!")
 
 def db():
     conn = sqlite3.connect(DB_PATH)
@@ -54,8 +52,7 @@ def init_db():
             description TEXT DEFAULT '',
             price REAL NOT NULL,
             image TEXT DEFAULT '',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(category_id) REFERENCES categories(id)
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS orders(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,11 +100,9 @@ def add_product(cat_id, title, desc, price, image):
         c.commit()
 
 def update_product(pid, field, value):
-    if field not in {"title","description","price","image","category_id"}:
-        return
+    if field not in {"title","description","price","image","category_id"}: return
     with db() as c:
-        c.execute(f"UPDATE products SET {field}=? WHERE id=?", (value, pid))
-        c.commit()
+        c.execute(f"UPDATE products SET {field}=? WHERE id=?", (value, pid)); c.commit()
 
 def delete_product(pid):
     with db() as c:
@@ -130,8 +125,7 @@ def get_orders(uid=None):
         return [dict(r) for r in rows]
 
 def is_admin(uid):
-    if uid == ADMIN_ID:
-        return True
+    if uid == ADMIN_ID: return True
     with db() as c:
         return c.execute("SELECT 1 FROM admins WHERE user_id=?", (uid,)).fetchone() is not None
 
@@ -143,16 +137,12 @@ def add_admin(uid, uname):
 
 def get_user_stats(uid):
     with db() as c:
-        orders_count = c.execute(
-            "SELECT COUNT(*) FROM orders WHERE user_id=?", (uid,)
-        ).fetchone()[0]
-        st = c.execute(
-            "SELECT count, discount_active FROM stickers WHERE user_id=?", (uid,)
-        ).fetchone()
-        if st:
-            stickers, discount = st["count"], st["discount_active"]
-        else:
-            stickers, discount = 0, 0
+        orders_count = c.execute("SELECT COUNT(*) FROM orders WHERE user_id=?",
+                                 (uid,)).fetchone()[0]
+        st = c.execute("SELECT count, discount_active FROM stickers WHERE user_id=?",
+                       (uid,)).fetchone()
+        if st: stickers, discount = st["count"], st["discount_active"]
+        else: stickers, discount = 0, 0
         return {"orders": orders_count, "stickers": stickers,
                 "discount_active": bool(discount)}
 
@@ -161,24 +151,19 @@ def add_sticker(uid):
         st = c.execute("SELECT count FROM stickers WHERE user_id=?", (uid,)).fetchone()
         if not st:
             c.execute("INSERT INTO stickers(user_id,count) VALUES(?,1)", (uid,))
-            c.commit()
-            return 1
+            c.commit(); return 1
         count = st["count"] + 1
         if count >= 10:
             c.execute("UPDATE stickers SET count=0, discount_active=1 WHERE user_id=?",
-                      (uid,))
-            c.commit()
-            return 0
+                      (uid,)); c.commit(); return 0
         c.execute("UPDATE stickers SET count=? WHERE user_id=?", (count, uid))
-        c.commit()
-        return count
+        c.commit(); return count
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp  = Dispatcher()
 
 class AddP(StatesGroup):
     cat=State(); title=State(); desc=State(); price=State(); photo=State()
-
 class EditP(StatesGroup):
     val=State()
 
@@ -195,13 +180,12 @@ def admin_menu():
 async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     u = m.from_user
-    if u.id == ADMIN_ID:
-        add_admin(u.id, u.username)
+    if u.id == ADMIN_ID: add_admin(u.id, u.username)
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🛒 Открыть магазин",
                              web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))
     ]])
-    await m.answer(f"<b>CLOUD99</b> — магазин\n\nПривет, {u.first_name}! Открой магазин 👇",
+    await m.answer(f"<b>CLOUD99</b>\n\nПривет, {u.first_name}! Открой магазин 👇",
                    reply_markup=kb)
 
 @dp.message(Command("cancel"))
@@ -213,14 +197,12 @@ async def cmd_cancel(m: Message, state: FSMContext):
 @dp.message(Command("admin"))
 async def cmd_admin(m: Message, state: FSMContext):
     await state.clear()
-    if not is_admin(m.from_user.id):
-        return await m.answer("Нет доступа.")
+    if not is_admin(m.from_user.id): return await m.answer("Нет доступа.")
     await m.answer("Админ-панель CLOUD99:", reply_markup=admin_menu())
 
 @dp.message(F.text == "⬅️ Выйти")
 async def admin_exit(m: Message, state: FSMContext):
-    await state.clear()
-    await m.answer("Ок.", reply_markup=None)
+    await state.clear(); await m.answer("Ок.", reply_markup=None)
 
 @dp.message(F.text == "➕ Добавить товар")
 async def add_begin(m: Message):
@@ -252,10 +234,8 @@ async def add_desc(m: Message, state: FSMContext):
 
 @dp.message(AddP.price)
 async def add_price(m: Message, state: FSMContext):
-    try:
-        p = float(m.text.replace(",", ".").strip())
-    except ValueError:
-        return await m.answer("Не число. Ещё раз:")
+    try: p = float(m.text.replace(",", ".").strip())
+    except ValueError: return await m.answer("Не число. Ещё раз:")
     await state.update_data(price=p)
     await state.set_state(AddP.photo)
     await m.answer("Фото (или «-»):")
@@ -309,15 +289,11 @@ async def edit_save(m: Message, state: FSMContext):
             f = await bot.get_file(m.photo[-1].file_id)
             val = f"images/{m.photo[-1].file_id}.jpg"
             await bot.download_file(f.file_path, val)
-        else:
-            val = ""
-    elif field == "price":
-        val = float(m.text.replace(",", "."))
-    else:
-        val = m.text.strip()
+        else: val = ""
+    elif field == "price": val = float(m.text.replace(",", "."))
+    else: val = m.text.strip()
     update_product(pid, field, val)
-    await m.answer("✅ Обновлено.")
-    await state.clear()
+    await m.answer("✅ Обновлено."); await state.clear()
 
 @dp.message(F.text == "🗑 Удалить")
 async def del_list(m: Message):
@@ -359,95 +335,126 @@ HTML = r"""<!DOCTYPE html>
 <title>CLOUD99</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#0f1114;--card:#191c22;--card2:#20242c;--accent:#7c5cff;
---accent2:#a48bff;--text:#eef1f6;--muted:#8b93a7;--sd:#0a0c0f;--sl:#252a33;--r:20px}
+:root{
+  --bg:#1a1d16; --card:#242820; --card2:#2c3026;
+  --olive:#4a5535; --olive2:#5d6b42; --sand:#c9b487;
+  --accent:#8b9556; --accent2:#a8b56a;
+  --text:#e8e6d8; --muted:#8a8a72;
+  --sd:#0d0f0a; --sl:#363a2e; --r:14px;
+  --danger:#a04a3a;
+}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--text);
-font-family:-apple-system,system-ui,sans-serif;padding-bottom:90px;min-height:100vh}
+  font-family:"Courier New",Courier,monospace;padding-bottom:90px;min-height:100vh;
+  background-image:
+    linear-gradient(rgba(139,149,86,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139,149,86,.04) 1px, transparent 1px);
+  background-size:20px 20px;}
 .topbar{display:flex;justify-content:space-between;align-items:center;
-padding:16px;position:sticky;top:0;background:rgba(15,17,20,.9);
-backdrop-filter:blur(12px);z-index:20;border-bottom:1px solid #1c2026}
-.logo{font-weight:900;letter-spacing:2px;font-size:20px;
-background:linear-gradient(135deg,var(--accent),var(--accent2));
--webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  padding:14px 16px;position:sticky;top:0;background:rgba(26,29,22,.95);
+  backdrop-filter:blur(10px);z-index:20;border-bottom:2px solid var(--olive)}
+.logo{font-weight:900;letter-spacing:3px;font-size:18px;color:var(--sand);
+  text-transform:uppercase;text-shadow:1px 1px 0 var(--sd)}
+.logo:before{content:"◤ ";color:var(--accent2)}
 .topbar-right{display:flex;gap:8px;align-items:center}
-.profile-btn{background:var(--card);padding:10px 14px;border-radius:14px;
-box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);cursor:pointer;font-size:16px}
-.cart-btn{background:var(--card);padding:10px 16px;border-radius:14px;
-box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);
-font-weight:700;position:relative;cursor:pointer}
+.profile-btn,.cart-btn{background:var(--card);padding:10px 14px;border-radius:8px;
+  box-shadow:3px 3px 0 var(--sd);cursor:pointer;border:1px solid var(--olive);
+  color:var(--text);font-family:inherit;font-weight:700}
 .cart-btn span{color:var(--accent2)}
-.badge{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;
-border-radius:50%;width:22px;height:22px;font-size:12px;display:flex;
-align-items:center;justify-content:center;font-weight:900}
-.cats{display:flex;gap:10px;overflow-x:auto;padding:16px;scrollbar-width:none}
+.badge{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;
+  border-radius:50%;width:22px;height:22px;font-size:12px;display:flex;
+  align-items:center;justify-content:center;font-weight:900}
+.cart-btn{position:relative}
+.cats{display:flex;gap:8px;overflow-x:auto;padding:14px 16px;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
-.cat{flex:0 0 auto;padding:12px 20px;border-radius:16px;background:var(--card);
-font-weight:800;font-size:13px;cursor:pointer;
-box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl);
-border:none;color:var(--text);transition:.18s}
-.cat.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
-.cat:active{transform:scale(.95)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 16px}
+.cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);
+  font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;
+  box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);
+  color:var(--text);text-transform:uppercase;font-family:inherit}
+.cat.active{background:var(--olive);color:var(--sand);border-color:var(--sand)}
+.cat:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px}
 .card{background:var(--card);border-radius:var(--r);padding:12px;
-box-shadow:7px 7px 16px var(--sd),-7px -7px 16px var(--sl);
-display:flex;flex-direction:column;gap:8px}
-.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:16px;background:var(--card2)}
-.ph{width:100%;aspect-ratio:1/1;border-radius:16px;background:var(--card2);
-display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:40px}
-.card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}
-.card .p{font-size:16px;font-weight:900;color:var(--accent2)}
-.btn{border:none;border-radius:16px;padding:11px 14px;font-weight:800;
-font-size:13px;cursor:pointer;font-family:inherit}
-.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
-box-shadow:0 6px 16px rgba(124,92,255,.45)}
-.btn.ghost{background:var(--card);color:var(--text);
-box-shadow:4px 4px 10px var(--sd),-4px -4px 10px var(--sl)}
+  box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);
+  display:flex;flex-direction:column;gap:8px;position:relative}
+.card:before{content:"";position:absolute;top:6px;right:8px;width:6px;height:6px;
+  background:var(--accent);border-radius:50%}
+.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;
+  background:var(--card2);border:1px solid var(--olive)}
+.ph{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);
+  display:flex;align-items:center;justify-content:center;color:var(--muted);
+  font-size:40px;border:1px solid var(--olive)}
+.card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px;
+  color:var(--text)}
+.card .p{font-size:15px;font-weight:900;color:var(--sand)}
+.btn{border:none;border-radius:8px;padding:11px 14px;font-weight:800;
+  font-size:12px;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;
+  font-family:inherit;transition:.1s}
+.btn.primary{background:var(--olive);color:var(--sand);border:1px solid var(--sand);
+  box-shadow:3px 3px 0 var(--sd)}
+.btn.primary:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
+.btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--olive);
+  box-shadow:3px 3px 0 var(--sd)}
+.btn.ghost:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .add{margin-top:auto}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;
-align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(8px)}
+.modal{position:fixed;inset:0;background:rgba(10,12,8,.85);display:flex;
+  align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(6px)}
 .modal.hidden{display:none}
-.sheet{background:var(--card);border-radius:28px 28px 0 0;padding:22px;
-width:100%;max-height:85vh;overflow-y:auto}
-.sheet h2{margin:0 0 16px;font-size:20px}
+.sheet{background:var(--card);border-radius:14px 14px 0 0;padding:22px;
+  width:100%;max-height:85vh;overflow-y:auto;border-top:3px solid var(--olive);
+  animation:up .2s}
+@keyframes up{from{transform:translateY(40px)}to{transform:translateY(0)}}
+.sheet h2{margin:0 0 16px;font-size:18px;color:var(--sand);
+  text-transform:uppercase;letter-spacing:2px;
+  border-bottom:1px dashed var(--olive);padding-bottom:10px}
 .ci{display:flex;justify-content:space-between;align-items:center;
-padding:12px 0;border-bottom:1px solid #262b34;gap:10px}
+  padding:12px 0;border-bottom:1px dashed var(--olive);gap:10px}
 .ci .info{flex:1}
 .ci .info b{display:block;font-size:13px}
 .ci .info span{font-size:12px;color:var(--muted)}
 .qty{display:flex;gap:6px;align-items:center}
-.qty button{width:30px;height:30px;border-radius:10px;border:none;
-background:var(--card2);color:#fff;font-size:16px;font-weight:900;cursor:pointer}
+.qty button{width:30px;height:30px;border-radius:6px;
+  border:1px solid var(--olive);background:var(--card2);color:var(--sand);
+  font-size:16px;font-weight:900;cursor:pointer;font-family:inherit}
 .qty span{min-width:20px;text-align:center;font-weight:800}
-.total{font-size:18px;margin:18px 0;padding-top:16px;border-top:2px solid #262b34;
-display:flex;justify-content:space-between}
-.total b{color:var(--accent2)}
-.empty{text-align:center;color:var(--muted);padding:40px 0}
+.total{font-size:16px;margin:18px 0;padding-top:16px;
+  border-top:2px solid var(--olive);display:flex;justify-content:space-between;
+  text-transform:uppercase;letter-spacing:1px}
+.total b{color:var(--sand)}
+.empty{text-align:center;color:var(--muted);padding:40px 0;font-style:italic}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);
-background:var(--accent);color:#fff;padding:12px 22px;border-radius:14px;
-font-weight:700;z-index:200}
-.profile-card{background:var(--card2);border-radius:var(--r);padding:18px;
-box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl);margin-bottom:14px}
-.avatar{width:64px;height:64px;border-radius:20px;
-background:linear-gradient(135deg,var(--accent),var(--accent2));
-display:flex;align-items:center;justify-content:center;font-size:28px;
-font-weight:900;color:#fff;margin-bottom:12px}
-.profile-name{font-size:18px;font-weight:900;margin-bottom:4px}
-.profile-sub{color:var(--muted);font-size:13px;margin-bottom:2px}
-.stickers{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.sticker{width:44px;height:44px;border-radius:50%;background:var(--card);
-display:flex;align-items:center;justify-content:center;font-size:20px;
-box-shadow:inset 3px 3px 8px var(--sd),inset -3px -3px 8px var(--sl)}
-.sticker.filled{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
-.section-title{font-size:16px;font-weight:900;margin:20px 0 10px}
-.order{background:var(--card2);border-radius:16px;padding:14px;margin-bottom:10px}
-.order b{color:var(--accent2)}
-.order .meta{color:var(--muted);font-size:12px}
+  background:var(--olive);color:var(--sand);padding:12px 22px;border-radius:8px;
+  font-weight:700;z-index:200;border:1px solid var(--sand);
+  box-shadow:3px 3px 0 var(--sd);text-transform:uppercase;font-size:12px;
+  letter-spacing:1px;font-family:inherit}
+.profile-card{background:var(--card2);border-radius:10px;padding:16px;
+  box-shadow:3px 3px 0 var(--sd);margin-bottom:14px;border:1px solid var(--olive)}
+.avatar{width:60px;height:60px;border-radius:8px;background:var(--olive);
+  display:flex;align-items:center;justify-content:center;font-size:26px;
+  font-weight:900;color:var(--sand);margin-bottom:12px;
+  border:2px solid var(--sand);box-shadow:2px 2px 0 var(--sd)}
+.profile-name{font-size:17px;font-weight:900;margin-bottom:4px;color:var(--sand);
+  text-transform:uppercase;letter-spacing:1px}
+.profile-sub{color:var(--muted);font-size:12px;margin-bottom:2px;
+  font-family:"Courier New",monospace}
+.stickers{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.sticker{width:38px;height:38px;border-radius:6px;background:var(--card);
+  display:flex;align-items:center;justify-content:center;font-size:18px;
+  border:1px solid var(--olive);color:var(--muted)}
+.sticker.filled{background:var(--olive);color:var(--sand);border-color:var(--sand);
+  box-shadow:0 0 8px rgba(139,149,86,.5)}
+.section-title{font-size:14px;font-weight:900;margin:20px 0 10px;
+  color:var(--sand);text-transform:uppercase;letter-spacing:2px;
+  border-left:3px solid var(--olive);padding-left:10px}
+.order{background:var(--card2);border-radius:8px;padding:14px;margin-bottom:10px;
+  border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}
+.order b{color:var(--sand)}
+.order .meta{color:var(--muted);font-size:11px;font-family:monospace}
 </style>
 </head>
 <body>
 <div class="topbar">
-  <div class="logo">CLOUD99</div>
+  <div class="logo">Cloud99</div>
   <div class="topbar-right">
     <div class="profile-btn" onclick="openProfile()">👤</div>
     <div class="cart-btn" onclick="openCart()">
@@ -474,7 +481,7 @@ box-shadow:inset 3px 3px 8px var(--sd),inset -3px -3px 8px var(--sl)}
 
 <div class="modal hidden" id="profile" onclick="if(event.target===this)closeProfile()">
   <div class="sheet">
-    <h2>👤 Профиль</h2>
+    <h2>👤 Личный кабинет</h2>
     <div id="profileContent">Загрузка...</div>
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px"
             onclick="closeProfile()">Закрыть</button>
@@ -519,7 +526,7 @@ async function loadProducts(){
   }
   g.innerHTML = PRODUCTS.map(p=>`
     <div class="card">
-      ${p.image ? `<img src="/${p.image}" alt="">` : `<div class="ph">🛍</div>`}
+      ${p.image ? `<img src="/${p.image}" alt="">` : `<div class="ph">📦</div>`}
       <div class="t">${escape(p.title)}</div>
       <div class="p">${money(p.price)}</div>
       <button class="btn primary add" onclick="addToCart(${p.id})">В корзину</button>
@@ -533,7 +540,7 @@ function addToCart(id){
   const p = PRODUCTS.find(x=>x.id===id);
   if (!p) return;
   if (CART[id]) CART[id].qty++; else CART[id] = {id, title:p.title, price:p.price, qty:1};
-  saveCart(); updateBadge(); toast('Добавлено ✓');
+  saveCart(); updateBadge(); toast('В корзине ✓');
 }
 
 function updateBadge(){
@@ -575,7 +582,7 @@ function chQty(id,d){
 
 async function checkout(){
   const items = Object.values(CART);
-  if (!items.length) return toast('Корзина пуста');
+  if (!items.length) return toast('Пусто');
   const u = tg?.initDataUnsafe?.user || {id:0, username:'guest'};
   const total = items.reduce((s,i)=>s+i.price*i.qty,0);
   const res = await api('/api/order', {
@@ -590,8 +597,8 @@ async function checkout(){
   });
   if (res.ok){
     CART = {}; saveCart(); updateBadge(); closeCart();
-    toast('Заказ #'+res.order_id+' оформлен ✓');
-  } else { toast('Ошибка. Попробуй ещё.'); }
+    toast('Заказ #'+res.order_id+' принят ✓');
+  } else { toast('Ошибка'); }
 }
 
 function toast(t){
@@ -613,16 +620,16 @@ async function openProfile(){
   const initial = (u.first_name || u.username || 'C')[0].toUpperCase();
   let stickersHtml = '';
   for (let i = 0; i < 10; i++){
-    stickersHtml += `<div class="sticker${i < st.stickers ? ' filled' : ''}">${i < st.stickers ? '⭐' : ''}</div>`;
+    stickersHtml += `<div class="sticker${i < st.stickers ? ' filled' : ''}">${i < st.stickers ? '★' : ''}</div>`;
   }
   let ordersHtml = '';
   if (!orders.length){
-    ordersHtml = '<div class="empty">У вас пока нет заказов</div>' +
+    ordersHtml = '<div class="empty">Заказов пока нет</div>' +
                  '<button class="btn primary" style="width:100%;margin-top:12px" onclick="closeProfile()">Начать покупку</button>';
   } else {
     ordersHtml = orders.map(o=>`
-      <div class="order">
-        <b>Заказ #${o.id}</b><br>
+      <div class="
+ <b>ЗАКАЗ #${o.id}</b><br>
         <span class="meta">${o.created_at}</span><br>
         📦 ${escape(o.items)}<br>
         💰 <b>${o.total.toFixed(2)} BYN</b>
@@ -638,8 +645,8 @@ async function openProfile(){
       <div class="profile-sub">Заказов: ${st.orders}</div>
     </div>
     <div class="profile-card">
-      <div style="font-weight:900">Собери 10 стикеров и получи скидку</div>
-      ${st.discount_active ? '<div style="color:var(--accent2);font-weight:800;margin-top:6px">🎁 Скидка активна!</div>' : ''}
+      <div style="font-weight:900;color:var(--sand);text-transform:uppercase;letter-spacing:1px;font-size:13px">10 отметок = скидка</div>
+      ${st.discount_active ? '<div style="color:var(--sand);font-weight:800;margin-top:6px">★ СКИДКА АКТИВНА!</div>' : ''}
       <div class="stickers">${stickersHtml}</div>
     </div>
     <div class="section-title">История заказов</div>
@@ -675,7 +682,7 @@ async def handle_order(req):
         new_count = add_sticker(uid)
         if new_count == 0:
             try:
-                await bot.send_message(uid, "🎉 Вы собрали 10 стикеров! Скидка активирована.")
+                await bot.send_message(uid, "★ Вы собрали 10 отметок! Скидка активирована.")
             except Exception:
                 pass
     with db() as c:
@@ -716,8 +723,7 @@ def build_web():
     return app
 
 async def keep_alive():
-    if not PUBLIC_URL:
-        return
+    if not PUBLIC_URL: return
     import aiohttp
     url = PUBLIC_URL.rstrip("/") + "/health"
     while True:

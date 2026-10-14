@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-Стикер начисляется только при нажатии "Заказ готов".
+Кнопки: ✅ Подтвердить / 🚚 В пути / ❌ Отклонить.
+Стикер начисляется только при ✅ Подтвердить.
 10 стикеров → уведомление админу → ручное обнуление + скидка 15% от 35 BYN.
 """
 
@@ -147,7 +148,7 @@ def add_admin(uid, uname):
 def get_user_stats(uid):
     with db() as c:
         orders_count = c.execute(
-            "SELECT COUNT(*) FROM orders WHERE user_id=? AND status='ready'",
+            "SELECT COUNT(*) FROM orders WHERE user_id=? AND status IN ('confirmed','shipping','ready')",
             (uid,)).fetchone()[0]
         st = c.execute("SELECT count, discount_active FROM stickers WHERE user_id=?",
                        (uid,)).fetchone()
@@ -174,7 +175,6 @@ def add_sticker(uid):
         return count, False
 
 def reset_stickers(uid):
-    """Обнуляет стикеры и активирует скидку клиенту."""
     with db() as c:
         c.execute("""INSERT INTO stickers(user_id, count, discount_active)
                      VALUES(?, 0, 1)
@@ -370,43 +370,55 @@ async def orders(m: Message):
     os_ = get_orders()
     if not os_: return await m.answer("Заказов нет.")
     for o in os_[:15]:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Заказ готов",
-                                  callback_data=f"ready:{o['id']}:{o['user_id']}")],
-            [InlineKeyboardButton(text="❌ Отклонить",
-                                  callback_data=f"reject:{o['id']}:{o['user_id']}")],
-            [InlineKeyboardButton(text="💬 Написать покупателю",
-                                  url=f"tg://user?id={o['user_id']}")],
-        ])
+        status = o.get('status','new')
+        if status == 'new':
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{o['id']}:{o['user_id']}")],
+                [InlineKeyboardButton(text="🚚 В пути", callback_data=f"shipping:{o['id']}:{o['user_id']}")],
+                [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{o['id']}:{o['user_id']}")],
+            ])
+        elif status == 'confirmed':
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🚚 В пути", callback_data=f"shipping:{o['id']}:{o['user_id']}")],
+                [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{o['id']}:{o['user_id']}")],
+            ])
+        else:
+            kb = None
         await m.answer(
-            f"<b>Заказ #{o['id']}</b> [{o.get('status','new')}]\n"
+            f"<b>Заказ #{o['id']}</b> [{status}]\n"
             f"👤 {o['username']} (<code>{o['user_id']}</code>)\n"
             f"📦 {o['items']}\n"
             f"💰 <b>{o['total']:.2f} BYN</b>\n"
             f"🕒 {o['created_at']}",
             reply_markup=kb)
 
-# ---------- КНОПКИ СТАТУСА ----------
-@dp.callback_query(F.data.startswith("ready:"))
-async def order_ready(c: CallbackQuery):
+# ---------- КНОПКИ СТАТУСА ЗАКАЗА ----------
+@dp.callback_query(F.data.startswith("confirm:"))
+async def order_confirm(c: CallbackQuery):
     _, oid, uid = c.data.split(":")
     oid = int(oid); uid = int(uid)
-    update_order_status(oid, "ready")
+    update_order_status(oid, "confirmed")
 
     new_count, reached_10 = add_sticker(uid)
 
     try:
         await bot.send_message(
             uid,
-            f"✅ <b>Ваш заказ #{oid} готов к выдаче!</b>\n\n"
-            f"Можете забрать его. Спасибо за покупку! 🎉"
+            f"✅ <b>Ваш заказ #{oid} подтверждён!</b>\n\n"
+            f"Мы начали собирать его. Спасибо за покупку! 🎉"
         )
     except Exception as e:
-        log.warning(f"notify client: {e}")
+        log.warning(f"notify client {uid}: {e}")
 
-    await c.message.edit_reply_markup(reply_markup=None)
+    new_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚚 В пути", callback_data=f"shipping:{oid}:{uid}")],
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{oid}:{uid}")],
+        [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={uid}")],
+    ])
+    await c.message.edit_reply_markup(reply_markup=new_kb)
     await c.message.answer(
-        f"✅ Заказ #{oid} подтверждён. У клиента теперь <b>{new_count}/10</b> стикеров."
+        f"✅ Заказ #{oid} подтверждён.\n"
+        f"У клиента теперь <b>{new_count}/10</b> стикеров."
     )
 
     if reached_10:
@@ -414,7 +426,6 @@ async def order_ready(c: CallbackQuery):
             await bot.send_message(
                 ADMIN_ID,
                 f"🎯 <b>Клиент набрал 10 стикеров!</b>\n\n"
-                f"👤 {c.from_user.full_name} (<code>{uid}</code>)\n\n"
                 f"Обнули стикеры командой:\n"
                 f"<code>/reset_stickers {uid}</code>\n\n"
                 f"После этого клиент получит скидку {DISCOUNT_PERCENT}% "
@@ -422,6 +433,29 @@ async def order_ready(c: CallbackQuery):
             )
         except Exception as e:
             log.warning(f"notify admin: {e}")
+
+
+@dp.callback_query(F.data.startswith("shipping:"))
+async def order_shipping(c: CallbackQuery):
+    _, oid, uid = c.data.split(":")
+    oid = int(oid); uid = int(uid)
+    update_order_status(oid, "shipping")
+
+    try:
+        await bot.send_message(
+            uid,
+            f"🚚 <b>Ваш заказ #{oid} в пути!</b>\n\n"
+            f"Скоро будет у вас. Ожидайте! 📦"
+        )
+    except Exception as e:
+        log.warning(f"notify client {uid}: {e}")
+
+    new_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={uid}")],
+    ])
+    await c.message.edit_reply_markup(reply_markup=new_kb)
+    await c.message.answer(f"🚚 Заказ #{oid} помечен как «В пути». Клиент уведомлён.")
+
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def order_reject(c: CallbackQuery):
@@ -433,10 +467,10 @@ async def order_reject(c: CallbackQuery):
         await bot.send_message(
             uid,
             f"❌ <b>Заказ #{oid} отклонён.</b>\n\n"
-            f"Если это ошибка — напишите нам."
+            f"Стикер не начислен. Если это ошибка — напишите нам."
         )
     except Exception as e:
-        log.warning(f"notify client: {e}")
+        log.warning(f"notify client {uid}: {e}")
 
     await c.message.edit_reply_markup(reply_markup=None)
     await c.message.answer(f"❌ Заказ #{oid} отклонён. Стикер не начислен.")
@@ -765,7 +799,8 @@ function toast(t){
 }
 
 function statusLabel(s){
-  return {'new':'Новый','ready':'Готов','rejected':'Отклонён'}[s] || s;
+  return {'new':'Новый','confirmed':'Подтверждён','shipping':'В пути',
+          'rejected':'Отклонён','ready':'Готов'}[s] || s;
 }
 
 async function openProfile(){
@@ -854,12 +889,12 @@ async def handle_order(req):
             disc_line = f"🎁 Скидка: −{discount:.2f} BYN\n" if discount > 0 else ""
             await bot.send_message(
                 uid,
-                f"✅ <b>Заказ #{oid} принят!</b>\n\n"
+                f"🕒 <b>Заказ #{oid} оформлен!</b>\n\n"
                 f"📦 {items_str}\n"
                 f"💵 Сумма: {subtotal:.2f} BYN\n"
                 f"{disc_line}"
                 f"💰 Итого: <b>{total:.2f} BYN</b>\n\n"
-                f"Мы свяжемся с вами, когда заказ будет готов."
+                f"Ожидайте подтверждения заказа."
             )
         except Exception as e:
             log.warning(f"notify client {uid}: {e}")
@@ -873,10 +908,11 @@ async def handle_order(req):
             f"📦 {items_str}\n"
             f"{disc_line}"
             f"💰 <b>{total:.2f} BYN</b>\n\n"
-            f"Стикер начислится после нажатия <b>✅ Заказ готов</b>.")
+            f"Выбери действие:")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Заказ готов", callback_data=f"ready:{oid}:{uid}")],
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{oid}:{uid}")],
+        [InlineKeyboardButton(text="🚚 В пути", callback_data=f"shipping:{oid}:{uid}")],
         [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{oid}:{uid}")],
         [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={uid}")],
     ])

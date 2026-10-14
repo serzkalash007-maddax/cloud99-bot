@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-Исправленная версия: без бага add_begin, с /cancel и логированием.
+Профиль, стикеры, история заказов.
 """
 
 import asyncio, os, sqlite3, logging, traceback
@@ -78,6 +78,11 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             username TEXT
         );
+        CREATE TABLE IF NOT EXISTS stickers(
+            user_id INTEGER PRIMARY KEY,
+            count INTEGER DEFAULT 0,
+            discount_active INTEGER DEFAULT 0
+        );
         """)
         for t, e, s in [("ЖИДКОСТИ","💧",1), ("РАСХОДНИКИ","🔧",2), ("ПОДЫ","💨",3)]:
             c.execute("INSERT OR IGNORE INTO categories(title,emoji,sort) VALUES(?,?,?)",
@@ -145,6 +150,53 @@ def add_admin(uid, uname):
                   (uid, uname or ""))
         c.commit()
 
+# ---- СТИКЕРЫ ----
+def get_user_stats(uid):
+    with db() as c:
+        orders_count = c.execute(
+            "SELECT COUNT(*) FROM orders WHERE user_id=?", (uid,)
+        ).fetchone()[0]
+        st = c.execute(
+            "SELECT count, discount_active FROM stickers WHERE user_id=?", (uid,)
+        ).fetchone()
+        if st:
+            stickers, discount = st["count"], st["discount_active"]
+        else:
+            stickers, discount = 0, 0
+        return {
+            "orders": orders_count,
+            "stickers": stickers,
+            "discount_active": bool(discount)
+        }
+
+def add_sticker(uid):
+    """Возвращает новое количество стикеров. 0 = скидка активирована."""
+    with db() as c:
+        st = c.execute(
+            "SELECT count FROM stickers WHERE user_id=?", (uid,)
+        ).fetchone()
+        if not st:
+            c.execute("INSERT INTO stickers(user_id,count) VALUES(?,1)", (uid,))
+            c.commit()
+            return 1
+        count = st["count"] + 1
+        if count >= 10:
+            c.execute(
+                "UPDATE stickers SET count=0, discount_active=1 WHERE user_id=?",
+                (uid,)
+            )
+            c.commit()
+            return 0
+        else:
+            c.execute("UPDATE stickers SET count=? WHERE user_id=?", (count, uid))
+            c.commit()
+            return count
+
+def use_discount(uid):
+    with db() as c:
+        c.execute("UPDATE stickers SET discount_active=0 WHERE user_id=?", (uid,))
+        c.commit()
+
 # ============================================================
 #                       БОТ
 # ============================================================
@@ -170,7 +222,7 @@ def admin_menu():
 @dp.message(CommandStart())
 async def cmd_start(m: Message, state: FSMContext):
     log.info(f"/start от {m.from_user.id} @{m.from_user.username}")
-    await state.clear()   # сброс на всякий случай
+    await state.clear()
     u = m.from_user
     if u.id == ADMIN_ID:
         add_admin(u.id, u.username)
@@ -187,14 +239,14 @@ async def cmd_start(m: Message, state: FSMContext):
 @dp.message(Command("cancel"))
 async def cmd_cancel(m: Message, state: FSMContext):
     await state.clear()
-    await m.answer("Отменено. Состояние сброшено.", reply_markup=admin_menu() if is_admin(m.from_user.id) else None)
-    log.info(f"/cancel от {m.from_user.id}")
+    await m.answer("Отменено.",
+                   reply_markup=admin_menu() if is_admin(m.from_user.id) else None)
 
 # ---------- /admin ----------
 @dp.message(Command("admin"))
 async def cmd_admin(m: Message, state: FSMContext):
     log.info(f"/admin от {m.from_user.id}")
-    await state.clear()  # важно: сброс залипшего состояния
+    await state.clear()
     if not is_admin(m.from_user.id):
         return await m.answer("Нет доступа.")
     await m.answer("Админ-панель CLOUD99:", reply_markup=admin_menu())
@@ -207,15 +259,12 @@ async def admin_exit(m: Message, state: FSMContext):
 # ---------- ДОБАВЛЕНИЕ ----------
 @dp.message(F.text == "➕ Добавить товар")
 async def add_begin(m: Message):
-    """Начало добавления товара. FSM не трогаем здесь — ставим ниже, в callback."""
-    log.info(f"[add] нажал 'Добавить товар' user={m.from_user.id}")
+    log.info(f"[add] user={m.from_user.id}")
     if not is_admin(m.from_user.id):
-        log.warning(f"[add] не админ: {m.from_user.id}")
         return
     cats = get_categories()
-    log.info(f"[add] категорий: {len(cats)}")
     if not cats:
-        return await m.answer("Нет категорий. Проверь базу.")
+        return await m.answer("Нет категорий.")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{c['emoji']} {c['title']}",
                               callback_data=f"ac:{c['id']}")] for c in cats])
@@ -223,9 +272,7 @@ async def add_begin(m: Message):
 
 @dp.callback_query(F.data.startswith("ac:"))
 async def add_cat(c: CallbackQuery, state: FSMContext):
-    cat_id = int(c.data.split(":")[1])
-    log.info(f"[add] выбрана категория {cat_id}")
-    await state.update_data(cat=cat_id)
+    await state.update_data(cat=int(c.data.split(":")[1]))
     await state.set_state(AddP.title)
     await c.message.edit_text("Название товара:")
 
@@ -234,7 +281,6 @@ async def add_title(m: Message, state: FSMContext):
     await state.update_data(title=m.text.strip())
     await state.set_state(AddP.desc)
     await m.answer("Описание (или «-»):")
-    log.info(f"[add] title={m.text}")
 
 @dp.message(AddP.desc)
 async def add_desc(m: Message, state: FSMContext):
@@ -262,7 +308,6 @@ async def add_photo(m: Message, state: FSMContext):
     d = await state.get_data()
     add_product(d["cat"], d["title"], d["desc"], d["price"], image)
     await m.answer(f"✅ «{d['title']}» добавлен.")
-    log.info(f"[add] товар сохранён: {d}")
     await state.clear()
 
 # ---------- РЕДАКТИРОВАНИЕ ----------
@@ -343,19 +388,10 @@ async def orders(m: Message):
             f"💰 <b>{o['total']:.2f} BYN</b>\n"
             f"🕒 {o['created_at']}")
 
-# ============================================================
-#                    ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК
-# ============================================================
+# ---------- ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ----------
 @dp.error()
 async def global_error(event, exception):
     log.error(f"ERROR: {exception}\n{traceback.format_exc()}")
-    try:
-        if hasattr(event, "message") and event.message:
-            await event.message.answer(f"⚠️ Ошибка: <code>{exception}</code>")
-        elif hasattr(event, "message") and event.message:
-            await event.message.answer(f"⚠️ Ошибка: <code>{exception}</code>")
-    except Exception:
-        pass
 
 # ============================================================
 #                    WEBAPP (HTTP-СЕРВЕР)
@@ -384,6 +420,10 @@ html,body{margin:0;background:var(--bg);color:var(--text);
 .logo{font-weight:900;letter-spacing:2px;font-size:20px;
   background:linear-gradient(135deg,var(--accent),var(--accent2));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.topbar-right{display:flex;gap:8px;align-items:center}
+.profile-btn{background:var(--card);padding:10px 14px;border-radius:14px;
+  box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);
+  font-weight:700;cursor:pointer;font-size:16px}
 .cart-btn{background:var(--card);padding:10px 16px;border-radius:14px;
   box-shadow:5px 5px 10px var(--sd),-5px -5px 10px var(--sl);
   font-weight:700;position:relative;cursor:pointer}
@@ -453,14 +493,36 @@ html,body{margin:0;background:var(--bg);color:var(--text);
   background:var(--accent);color:#fff;padding:12px 22px;border-radius:14px;
   font-weight:700;z-index:200;animation:fade .2s;
   box-shadow:0 8px 24px rgba(124,92,255,.5)}
+.profile-card{background:var(--card2);border-radius:var(--r);padding:18px;
+  box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl);margin-bottom:14px}
+.avatar{width:64px;height:64px;border-radius:20px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;font-size:28px;
+  font-weight:900;color:#fff;margin-bottom:12px}
+.profile-name{font-size:18px;font-weight:900;margin-bottom:4px}
+.profile-sub{color:var(--muted);font-size:13px;margin-bottom:2px}
+.stickers{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sticker{width:44px;height:44px;border-radius:50%;background:var(--card);
+  display:flex;align-items:center;justify-content:center;font-size:20px;
+  box-shadow:inset 3px 3px 8px var(--sd),inset -3px -3px 8px var(--sl)}
+.sticker.filled{background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff}
+.section-title{font-size:16px;font-weight:900;margin:20px 0 10px}
+.order{background:var(--card2);border-radius:16px;padding:14px;margin-bottom:10px;
+  box-shadow:5px 5px 12px var(--sd),-5px -5px 12px var(--sl)}
+.order b{color:var(--accent2)}
+.order .meta{color:var(--muted);font-size:12px}
 </style>
 </head>
 <body>
 <div class="topbar">
   <div class="logo">CLOUD99</div>
-  <div class="cart-btn" onclick="openCart()">
-    🛒 <span id="cc">0</span>
-    <div class="badge" id="cb" style="display:none">0</div>
+  <div class="topbar-right">
+    <div class="profile-btn" onclick="openProfile()">👤</div>
+    <div class="cart-btn" onclick="openCart()">
+      🛒 <span id="cc">0</span>
+      <div class="badge" id="cb" style="display:none">0</div>
+    </div>
   </div>
 </div>
 
@@ -476,6 +538,15 @@ html,body{margin:0;background:var(--bg);color:var(--text);
             onclick="checkout()">Оформить заказ</button>
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:8px"
             onclick="closeCart()">Закрыть</button>
+  </div>
+</div>
+
+<div class="modal hidden" id="profile" onclick="if(event.target===this)closeProfile()">
+  <div class="sheet">
+    <h2>👤 Профиль</h2>
+    <div id="profileContent">Загрузка...</div>
+    <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px"
+            onclick="closeProfile()">Закрыть</button>
   </div>
 </div>
 
@@ -591,7 +662,6 @@ async function checkout(){
   if (res.ok){
     CART = {}; saveCart(); updateBadge(); closeCart();
     toast('Заказ #'+res.order_id+' оформлен ✓');
-    if (tg) setTimeout(()=>tg.close(), 1200);
   } else { toast('Ошибка. Попробуй ещё.'); }
 }
 
@@ -602,89 +672,8 @@ function toast(t){
   setTimeout(()=>el.remove(), 1800);
 }
 
-loadCats(); loadProducts(); updateBadge();
-</script>
-</body>
-</html>
-"""
-
-async def handle_index(req):    return web.Response(text=HTML, content_type="text/html")
-async def handle_health(req):   return web.Response(text="ok")
-async def handle_categories(req): return web.json_response(get_categories())
-async def handle_products(req):
-    cat = req.query.get("cat")
-    return web.json_response(get_products(int(cat) if cat else None))
-
-async def handle_order(req):
-    data = await req.json()
-    items_str = "; ".join(f"{i['title']} x{i['qty']}" for i in data["items"])
-    oid = create_order(data.get("user_id",0), data.get("username","guest"),
-                       items_str, data.get("total",0))
-    with db() as c:
-        admins = [r["user_id"] for r in c.execute("SELECT user_id FROM admins").fetchall()]
-    text = (f"🛒 <b>Новый заказ #{oid}</b>\n"
-            f"👤 {data.get('username')} (<code>{data.get('user_id')}</code>)\n"
-            f"📦 {items_str}\n"
-            f"💰 <b>{data.get('total',0):.2f} BYN</b>")
-    for a in admins:
-        try:
-            await bot.send_message(a, text)
-        except Exception as e:
-            log.warning(f"notify {a}: {e}")
-    return web.json_response({"ok": True, "order_id": oid})
-
-async def handle_image(req):
-    name = req.match_info["name"]
-    path = IMAGES_DIR / name
-    if not path.exists():
-        return web.Response(status=404)
-    return web.FileResponse(path)
-
-def build_web():
-    app = web.Application()
-    app.router.add_get("/", handle_index)
-    app.router.add_get("/health", handle_health)
-    app.router.add_get("/api/categories", handle_categories)
-    app.router.add_get("/api/products", handle_products)
-    app.router.add_post("/api/order", handle_order)
-    app.router.add_get("/images/{name}", handle_image)
-    return app
-
-# ============================================================
-#                  KEEP-ALIVE
-# ============================================================
-async def keep_alive():
-    if not PUBLIC_URL: return
-    import aiohttp
-    url = PUBLIC_URL.rstrip("/") + "/health"
-    while True:
-        await asyncio.sleep(600)
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(url, timeout=20) as r:
-                    log.info(f"keep-alive: {r.status}")
-        except Exception as e:
-            log.warning(f"keep-alive error: {e}")
-
-# ============================================================
-#                       ЗАПУСК
-# ============================================================
-async def main():
-    init_db()
-    if not PUBLIC_URL:
-        log.warning("PUBLIC_URL не задан — WebApp-кнопка не откроется.")
-    runner = web.AppRunner(build_web())
-    await runner.setup()
-    site = web.TCPSite(runner, HOST, PORT)
-    await site.start()
-    log.info(f"WebApp: http://{HOST}:{PORT}")
-    asyncio.create_task(keep_alive())
-    await bot.delete_webhook(drop_pending_updates=True)
-    log.info("Bot started, polling...")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        log.info("Остановлено.")
+async function openProfile(){
+  const modal = document.getElementById('profile');
+  const box = document.getElementById('profileContent');
+  modal.classList.remove('hidden');
+  box.innerHTML = 'Загрузка...

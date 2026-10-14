@@ -659,7 +659,8 @@ loadCats(); loadProducts(); updateBadge();
 </script>
 </body>
 </html>
-"""async def handle_index(req):
+"""
+async def handle_index(req):
     return web.Response(text=HTML, content_type="text/html")
 
 async def handle_health(req):

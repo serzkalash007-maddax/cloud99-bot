@@ -49,16 +49,24 @@ async def init_db():
     async with p.connection() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS categories(id SERIAL PRIMARY KEY, title TEXT UNIQUE NOT NULL, emoji TEXT DEFAULT '', sort INTEGER DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS products(id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL, description TEXT DEFAULT '', price REAL NOT NULL, image TEXT DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS products(
+            id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL, 
+            description TEXT DEFAULT '', price REAL NOT NULL, image TEXT DEFAULT '', 
+            stock INTEGER DEFAULT 10, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS orders(id SERIAL PRIMARY KEY, user_id BIGINT, username TEXT, items TEXT, total REAL, status TEXT DEFAULT 'new', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS admins(user_id BIGINT PRIMARY KEY, username TEXT);
         CREATE TABLE IF NOT EXISTS stickers(user_id BIGINT PRIMARY KEY, count INTEGER DEFAULT 0, discount_active INTEGER DEFAULT 0);
         """)
+        # Автосоздание колонки stock, если её нет
+        await conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 10;")
+        
         for t, e, s in [("ЖИДКОСТИ","💧",1), ("РАСХОДНИКИ","🔧",2), ("ПОДЫ","💨",3)]:
             await conn.execute("INSERT INTO categories(title,emoji,sort) VALUES(%s,%s,%s) ON CONFLICT (title) DO NOTHING", (t, e, s))
         await conn.commit()
     log.info("DB initialized")
 
+# --- Функции базы ---
 async def get_categories():
     p = await get_pool()
     async with p.connection() as conn:
@@ -76,14 +84,14 @@ async def get_products(cat_id=None):
                 await cur.execute("SELECT * FROM products ORDER BY id DESC")
             return await cur.fetchall()
 
-async def add_product(cat_id, title, desc, price, image):
+async def add_product(cat_id, title, desc, price, image, stock):
     p = await get_pool()
     async with p.connection() as conn:
-        await conn.execute("INSERT INTO products(category_id,title,description,price,image) VALUES(%s,%s,%s,%s,%s)", (cat_id, title, desc, price, image))
+        await conn.execute("INSERT INTO products(category_id,title,description,price,image,stock) VALUES(%s,%s,%s,%s,%s,%s)", (cat_id, title, desc, price, image, stock))
         await conn.commit()
 
 async def update_product(pid, field, value):
-    if field not in {"title","description","price","image","category_id"}: return
+    if field not in {"title","description","price","image","category_id","stock"}: return
     p = await get_pool()
     async with p.connection() as conn:
         await conn.execute(f"UPDATE products SET {field}=%s WHERE id=%s", (value, pid))
@@ -176,22 +184,35 @@ bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp  = Dispatcher()
 
 class AddP(StatesGroup):
-    cat=State(); title=State(); desc=State(); price=State(); photo=State()
+    cat=State(); title=State(); desc=State(); price=State(); stock=State(); photo=State()
 class EditP(StatesGroup):
     val=State()
 
 def admin_menu():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="➕ Добавить товар")], [KeyboardButton(text="✏️ Редактировать")],
-        [KeyboardButton(text="🗑 Удалить")], [KeyboardButton(text="📦 Заказы")], [KeyboardButton(text="⬅️ Выйти")]
+        [KeyboardButton(text="➕ Добавить товар"), KeyboardButton(text="✏️ Редактировать")],
+        [KeyboardButton(text="🗑 Удалить"), KeyboardButton(text="📦 Заказы")],
+        [KeyboardButton(text="⬅️ Выйти")]
     ], resize_keyboard=True)
 
 @dp.message(CommandStart())
 async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     if m.from_user.id == ADMIN_ID: await add_admin(m.from_user.id, m.from_user.username)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))]])
-    await m.answer(f"<b>CLOUD99</b>\n\nПривет, {m.from_user.first_name}! Открой магазин 👇", reply_markup=kb)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))],
+        [InlineKeyboardButton(text="💬 Написать нам", url="https://t.me/fluckwh_666")] # Замени на свой
+    ])
+    await m.answer(f"<b>CLOUD99</b>\n\nПривет, {m.from_user.first_name}! Открой магазин 👇\nЕсли есть вопросы — жми «Написать нам».", reply_markup=kb)
+
+@dp.message(Command("help"))
+async def cmd_help(m: Message):
+    await m.answer(
+        "<b>📖 Помощь CLOUD99</b>\n\n"
+        "• <b>Как заказать?</b> — Открой магазин, выбери товар и нажми «В корзину», затем «Оформить заказ».\n"
+        "• <b>Как получить скидку?</b> — Сделай 10 заказов, и мы активируем тебе скидку 15% на заказ от 35 BYN.\n"
+        "• <b>Как связаться?</b> — Нажми «Написать нам» в главном меню."
+    )
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(m: Message, state: FSMContext):
@@ -242,12 +263,18 @@ async def add_desc(m: Message, state: FSMContext):
 async def add_price(m: Message, state: FSMContext):
     try: p = float(m.text.replace(",", ".").strip())
     except: return await m.answer("Не число.")
-    await state.update_data(price=p); await state.set_state(AddP.photo); await m.answer("Фото (или «-»):")
+    await state.update_data(price=p); await state.set_state(AddP.stock); await m.answer("Сколько штук в наличии?")
+
+@dp.message(AddP.stock)
+async def add_stock(m: Message, state: FSMContext):
+    try: s = int(m.text.strip())
+    except: return await m.answer("Введи целое число.")
+    await state.update_data(stock=s); await state.set_state(AddP.photo); await m.answer("Фото (или «-»):")
 
 @dp.message(AddP.photo, F.photo | F.text)
 async def add_photo(m: Message, state: FSMContext):
     image = m.photo[-1].file_id if m.photo else ""
-    d = await state.get_data(); await add_product(d["cat"], d["title"], d["desc"], d["price"], image); await m.answer(f"✅ «{d['title']}» добавлен."); await state.clear()
+    d = await state.get_data(); await add_product(d["cat"], d["title"], d["desc"], d["price"], image, d["stock"]); await m.answer(f"✅ «{d['title']}» добавлен."); await state.clear()
 
 @dp.message(F.text == "✏️ Редактировать")
 async def edit_list(m: Message):
@@ -262,7 +289,8 @@ async def edit_field(c: CallbackQuery):
     pid = c.data.split(":")[1]
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Название", callback_data=f"ef:{pid}:title")], [InlineKeyboardButton(text="Описание", callback_data=f"ef:{pid}:description")],
-        [InlineKeyboardButton(text="Цена", callback_data=f"ef:{pid}:price")], [InlineKeyboardButton(text="Фото", callback_data=f"ef:{pid}:image")]
+        [InlineKeyboardButton(text="Цена", callback_data=f"ef:{pid}:price")], [InlineKeyboardButton(text="Фото", callback_data=f"ef:{pid}:image")],
+        [InlineKeyboardButton(text="Кол-во на складе", callback_data=f"ef:{pid}:stock")]
     ])
     await c.message.edit_text("Что меняем?", reply_markup=kb)
 
@@ -275,6 +303,7 @@ async def edit_save(m: Message, state: FSMContext):
     d = await state.get_data(); field, pid = d["field"], d["pid"]
     if field == "image": val = m.photo[-1].file_id if m.photo else ""
     elif field == "price": val = float(m.text.replace(",", "."))
+    elif field == "stock": val = int(m.text.strip())
     else: val = m.text.strip()
     await update_product(pid, field, val); await m.answer("✅ Обновлено."); await state.clear()
 
@@ -295,22 +324,23 @@ async def orders(m: Message):
     if not await is_admin(m.from_user.id): return
     os_ = await get_orders()
     if not os_: return await m.answer("Заказов нет.")
-    for o in os_[:15]:
-        status = o.get('status','new')
-        if status == 'new':
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{o['id']}:{o['user_id']}"),
-                InlineKeyboardButton(text="🚚 В пути", callback_data=f"shipping:{o['id']}:{o['user_id']}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{o['id']}:{o['user_id']}"),
-            ]])
-        else: kb = None
-        await m.answer(f"<b>Заказ #{o['id']}</b> [{status}]\n👤 {o['username']}\n📦 {o['items']}\n💰 {o['total']:.2f} BYN", reply_markup=kb)
+    # Фильтр: показываем только новые
+    new_orders = [o for o in os_ if o.get('status') == 'new']
+    if not new_orders:
+        return await m.answer("Нет новых заказов. Все обработаны.")
+    for o in new_orders[:15]:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{o['id']}:{o['user_id']}"),
+            InlineKeyboardButton(text="🚚 В пути", callback_data=f"shipping:{o['id']}:{o['user_id']}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{o['id']}:{o['user_id']}"),
+        ]])
+        await m.answer(f"<b>Заказ #{o['id']}</b> [new]\n👤 {o['username']}\n📦 {o['items']}\n💰 {o['total']:.2f} BYN\n🆔 <code>{o['user_id']}</code>", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("confirm:"))
 async def order_confirm(c: CallbackQuery):
     _, oid, uid = c.data.split(":"); oid = int(oid); uid = int(uid)
     await update_order_status(oid, "confirmed"); new_count, reached_10 = await add_sticker(uid)
-    try: await bot.send_message(uid, f"✅ <b>Заказ #{oid} подтверждён!</b>")
+    try: await bot.send_message(uid, f"✅ <b>Заказ #{oid} подтверждён!</b> Мы начали собирать его.")
     except: pass
     await c.message.edit_reply_markup(reply_markup=None); await c.message.answer(f"✅ Заказ #{oid} подтверждён. Стикеров: <b>{new_count}/10</b>.")
     if reached_10:
@@ -358,28 +388,26 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
 .cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);color:var(--text);text-transform:uppercase;font-family:inherit;transition:.1s}
 .cat.active{background:var(--olive);color:var(--sand);border-color:var(--sand)}.cat:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px}
-
-/* --- Скелетоны и Лоадер --- */
 .loader{display:flex;flex-direction:column;align-items:center;justify-content:center;height:50vh;color:var(--sand)}
 .loader-spinner{width:40px;height:40px;border:4px solid var(--olive);border-top-color:var(--sand);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:14px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loader-text{font-size:12px;letter-spacing:2px;text-transform:uppercase;animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-
 .skeleton{background:var(--card);border-radius:var(--r);padding:12px;border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px}
 .sk-img{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);animation:pulse 1.5s infinite}
 .sk-title{height:14px;width:80%;background:var(--card2);border-radius:4px;animation:pulse 1.5s infinite}
 .sk-price{height:16px;width:40%;background:var(--card2);border-radius:4px;animation:pulse 1.5s infinite}
 .sk-btn{height:36px;width:100%;background:var(--card2);border-radius:8px;animation:pulse 1.5s infinite;margin-top:auto}
-
 .card{background:var(--card);border-radius:var(--r);padding:12px;box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px;position:relative;opacity:0;transform:translateY(10px);animation:fadeIn .3s forwards}
 @keyframes fadeIn{to{opacity:1;transform:translateY(0)}}
 .card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:var(--card2);border:1px solid var(--olive)}
 .ph{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:40px;border:1px solid var(--olive)}
 .card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}.card .p{font-size:15px;font-weight:900;color:var(--sand)}
+.stock{font-size:11px;color:var(--muted);margin-top:-4px}
 .btn{border:none;border-radius:8px;padding:11px 14px;font-weight:800;font-size:12px;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;font-family:inherit;transition:.1s}
 .btn.primary{background:var(--olive);color:var(--sand);border:1px solid var(--sand);box-shadow:3px 3px 0 var(--sd)}.btn.primary:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}.btn.ghost:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
+.btn.disabled{background:var(--card2);color:var(--muted);border:1px solid var(--olive);cursor:not-allowed;box-shadow:none}
 .add{margin-top:auto}
 .modal{position:fixed;inset:0;background:rgba(10,12,8,.85);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(6px)}.modal.hidden{display:none}
 .sheet{background:var(--card);border-radius:14px 14px 0 0;padding:22px;width:100%;max-height:85vh;overflow-y:auto;border-top:3px solid var(--olive);animation:up .2s}
@@ -406,6 +434,15 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
 .order .status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;background:var(--olive);color:var(--sand)}
 .copy-btn{margin-top:8px;font-size:10px;padding:4px 8px;background:transparent;border:1px solid var(--muted);color:var(--muted);border-radius:4px;cursor:pointer;width:max-content}
 .copy-btn:active{background:var(--card)}
+.product-modal{position:fixed;inset:0;background:rgba(10,12,8,.95);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px}
+.pm-box{background:var(--card);border-radius:var(--r);padding:18px;max-width:400px;width:100%;border:2px solid var(--olive);box-shadow:0 0 30px rgba(0,0,0,.8);position:relative;max-height:90vh;overflow-y:auto}
+.pm-close{position:absolute;top:10px;right:14px;font-size:24px;cursor:pointer;color:var(--sand)}
+.pm-box img{width:100%;border-radius:8px;margin-bottom:12px;border:1px solid var(--olive)}
+.pm-title{font-size:18px;font-weight:900;color:var(--sand);margin-bottom:6px}
+.pm-desc{font-size:13px;color:var(--text);margin-bottom:12px;line-height:1.4}
+.pm-price{font-size:20px;font-weight:900;color:var(--accent2);margin-bottom:14px}
+.scroll-top{position:fixed;bottom:24px;right:16px;width:44px;height:44px;border-radius:50%;background:var(--olive);color:var(--sand);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:3px 3px 0 var(--sd);cursor:pointer;opacity:0;pointer-events:none;transition:.3s;z-index:50;border:1px solid var(--sand)}
+.scroll-top.visible{opacity:1;pointer-events:auto}
 </style>
 </head>
 <body>
@@ -417,7 +454,9 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
   </div>
 </div>
 <div class="cats" id="cats"></div>
-<div class="grid" id="grid"></div>
+<div class="grid" id="grid">
+    <div class="loader"><div class="loader-spinner"></div><div class="loader-text">СИНХРОНИЗАЦИЯ...</div></div>
+</div>
 <div class="modal hidden" id="cart" onclick="if(event.target===this)closeCart()">
   <div class="sheet">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -437,6 +476,8 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px" onclick="closeProfile()">Закрыть</button>
   </div>
 </div>
+<div id="productModal" style="display:none" class="product-modal" onclick="if(event.target===this)closeProductModal()"></div>
+<div class="scroll-top" id="scrollTop" onclick="scrollToTop()">▲</div>
 <script>
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
@@ -459,36 +500,65 @@ async function loadCats(){
 
 async function loadProducts(){
   const g = document.getElementById('grid');
+  g.innerHTML = `<div class="loader"><div class="loader-spinner"></div><div class="loader-text">СИНХРОНИЗАЦИЯ...</div></div>`;
   
-  // 1. Показываем скелетоны перед загрузкой
-  g.innerHTML = `
-    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
-    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
-    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
-    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
-  `;
-
+  // Искусственная задержка, чтобы увидеть скелетоны (для красоты)
+  await new Promise(r => setTimeout(r, 500));
+  
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
   
-  // 2. Убираем скелетоны и показываем товары
   if (!PRODUCTS.length){
     g.innerHTML = '<div class="empty" style="grid-column:1/-1">Товаров нет</div>'; return;
   }
+  
   g.innerHTML = PRODUCTS.map((p,i)=>`
-    <div class="card" style="animation-delay:${i*0.05}s">
+    <div class="card" style="animation-delay:${i*0.05}s" onclick="openProduct(${p.id})">
       ${p.image ? `<img src="/tgimg/${p.image}" alt="">` : `<div class="ph">📦</div>`}
       <div class="t">${escape(p.title)}</div>
+      <div class="stock">${p.stock > 0 ? `В наличии: ${p.stock} шт` : 'Нет в наличии'}</div>
       <div class="p">${money(p.price)}</div>
-      <button class="btn primary add" onclick="addToCart(${p.id})">В корзину</button>
+      ${p.stock > 0 
+        ? `<button class="btn primary add" onclick="event.stopPropagation(); addToCart(${p.id})">В корзину</button>`
+        : `<button class="btn disabled add">Нет в наличии</button>`}
     </div>
   `).join('');
+}
+
+function openProduct(id){
+    const p = PRODUCTS.find(x=>x.id===id);
+    if (!p) return;
+    const modal = document.getElementById('productModal');
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div class="pm-box">
+        <div class="pm-close" onclick="closeProductModal()">×</div>
+        ${p.image ? `<img src="/tgimg/${p.image}" alt="">` : `<div class="ph" style="margin-bottom:12px">📦</div>`}
+        <div class="pm-title">${escape(p.title)}</div>
+        <div class="pm-desc">${escape(p.description || 'Описание отсутствует')}</div>
+        <div class="pm-price">${money(p.price)}</div>
+        <div class="stock" style="margin-bottom:12px">${p.stock > 0 ? `В наличии: ${p.stock} шт` : 'Нет в наличии'}</div>
+        ${p.stock > 0 
+          ? `<button class="btn primary" style="width:100%" onclick="addToCart(${p.id}); closeProductModal()">В корзину</button>`
+          : `<button class="btn disabled" style="width:100%">Нет в наличии</button>`}
+        <button class="btn ghost" style="width:100%;margin-top:8px" onclick="shareProduct(${p.id})">Поделиться</button>
+      </div>
+    `;
+}
+function closeProductModal(){ document.getElementById('productModal').style.display = 'none'; }
+
+function shareProduct(id){
+    const p = PRODUCTS.find(x=>x.id===id);
+    if(!p) return;
+    const text = `Зацени товар в CLOUD99: ${p.title} за ${money(p.price)}!`;
+    const url = `https://t.me/share/url?url=${encodeURIComponent('https://cloud99.onrender.com')}&text=${encodeURIComponent(text)}`;
+    if (tg) tg.openTelegramLink(url); else window.open(url, '_blank');
 }
 
 function escape(s){ return (s||'').replace(/[<>&"]/g, ch=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[ch])); }
 function addToCart(id){
   const p = PRODUCTS.find(x=>x.id===id);
-  if (!p) return;
+  if (!p || p.stock <= 0) return;
   if (CART[id]) CART[id].qty++; else CART[id] = {id, title:p.title, price:p.price, qty:1};
   saveCart(); updateBadge(); toast('В корзине ✓');
 }
@@ -546,6 +616,8 @@ function closeCart(){ document.getElementById('cart').classList.add('hidden'); }
 function clearCart(){ CART = {}; saveCart(); updateBadge(); openCart(); toast('Корзина очищена'); }
 function chQty(id,d){
   if (!CART[id]) return;
+  const p = PRODUCTS.find(x=>x.id===id);
+  if (d > 0 && p && CART[id].qty >= p.stock) return toast('Больше нет на складе');
   CART[id].qty += d;
   if (CART[id].qty<=0) delete CART[id];
   saveCart(); updateBadge(); openCart();
@@ -559,7 +631,7 @@ async function checkout(){
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
       user_id: u.id, username: u.username || u.first_name || 'guest',
-      items: items.map(i=>({title:i.title, qty:i.qty, price:i.price})),
+      items: items.map(i=>({id:i.id, title:i.title, qty:i.qty, price:i.price})),
       subtotal, discount, total, used_discount: eligible
     })
   });
@@ -585,13 +657,9 @@ async function openProfile(){
   const orders = res.orders || [];
   const st = res.stats || {orders:0, stickers:0, discount_active:false};
   
-  // Аватарка из ТГ, если есть
   let avatarHtml = '';
-  if (u.photo_url) {
-      avatarHtml = `<img src="${u.photo_url}" alt="">`;
-  } else {
-      avatarHtml = (u.first_name || u.username || 'C')[0].toUpperCase();
-  }
+  if (u.photo_url) { avatarHtml = `<img src="${u.photo_url}" alt="">`; }
+  else { avatarHtml = (u.first_name || u.username || 'C')[0].toUpperCase(); }
 
   let stickersHtml = '';
   for (let i = 0; i < 10; i++){ stickersHtml += `<div class="sticker${i < st.stickers ? ' filled' : ''}">${i < st.stickers ? '★' : ''}</div>`; }
@@ -631,6 +699,15 @@ function closeProfile(){ document.getElementById('profile').classList.add('hidde
 function copyId(id){
     navigator.clipboard.writeText(id.toString()).then(() => toast('ID скопирован'));
 }
+
+// Кнопка наверх
+window.addEventListener('scroll', () => {
+    const btn = document.getElementById('scrollTop');
+    if (window.scrollY > 300) btn.classList.add('visible');
+    else btn.classList.remove('visible');
+});
+function scrollToTop(){ window.scrollTo({top: 0, behavior: 'smooth'}); }
+
 loadCats(); loadProducts(); updateBadge();
 </script>
 </body>
@@ -653,11 +730,27 @@ async def handle_products(req):
 
 async def handle_order(req):
     data = await req.json()
-    items_str = "; ".join(f"{i['title']} x{i['qty']}" for i in data["items"])
+    items = data.get("items", [])
+    items_str = "; ".join(f"{i['title']} x{i['qty']}" for i in items)
     uid = data.get("user_id", 0); uname = data.get("username", "guest")
     total = data.get("total", 0); subtotal = data.get("subtotal", total)
     discount = data.get("discount", 0); used_discount = data.get("used_discount", False)
     
+    # Проверка остатков и списание
+    p = await get_pool()
+    async with p.connection() as conn:
+        for item in items:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT stock FROM products WHERE id=%s", (item['id'],))
+                stock_row = await cur.fetchone()
+                if not stock_row or stock_row[0] < item['qty']:
+                    return web.json_response({"ok": False, "error": f"Товара {item['title']} не хватает на складе"}, status=400)
+        
+        # Списываем
+        for item in items:
+            await conn.execute("UPDATE products SET stock = stock - %s WHERE id=%s", (item['qty'], item['id']))
+        await conn.commit()
+
     oid = await create_order(uid, uname, items_str, total)
     if used_discount and uid: await use_discount(uid)
 
@@ -667,7 +760,6 @@ async def handle_order(req):
             await bot.send_message(uid, f"🕒 <b>Заказ #{oid} оформлен!</b>\n\n📦 {items_str}\n💵 Сумма: {subtotal:.2f} BYN\n{disc_line}💰 Итого: <b>{total:.2f} BYN</b>\n\nОжидайте подтверждения.")
         except Exception as e: log.warning(f"notify client {uid}: {e}")
 
-    p = await get_pool()
     async with p.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT user_id FROM admins")

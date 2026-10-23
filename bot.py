@@ -59,7 +59,6 @@ async def init_db():
         await conn.commit()
     log.info("DB initialized")
 
-# --- Функции базы (как были) ---
 async def get_categories():
     p = await get_pool()
     async with p.connection() as conn:
@@ -359,6 +358,20 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
 .cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);color:var(--text);text-transform:uppercase;font-family:inherit;transition:.1s}
 .cat.active{background:var(--olive);color:var(--sand);border-color:var(--sand)}.cat:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px}
+
+/* --- Скелетоны и Лоадер --- */
+.loader{display:flex;flex-direction:column;align-items:center;justify-content:center;height:50vh;color:var(--sand)}
+.loader-spinner{width:40px;height:40px;border:4px solid var(--olive);border-top-color:var(--sand);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loader-text{font-size:12px;letter-spacing:2px;text-transform:uppercase;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.skeleton{background:var(--card);border-radius:var(--r);padding:12px;border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px}
+.sk-img{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);animation:pulse 1.5s infinite}
+.sk-title{height:14px;width:80%;background:var(--card2);border-radius:4px;animation:pulse 1.5s infinite}
+.sk-price{height:16px;width:40%;background:var(--card2);border-radius:4px;animation:pulse 1.5s infinite}
+.sk-btn{height:36px;width:100%;background:var(--card2);border-radius:8px;animation:pulse 1.5s infinite;margin-top:auto}
+
 .card{background:var(--card);border-radius:var(--r);padding:12px;box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px;position:relative;opacity:0;transform:translateY(10px);animation:fadeIn .3s forwards}
 @keyframes fadeIn{to{opacity:1;transform:translateY(0)}}
 .card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:var(--card2);border:1px solid var(--olive)}
@@ -404,7 +417,7 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
   </div>
 </div>
 <div class="cats" id="cats"></div>
-<div class="grid" id="grid"><div class="empty">Загрузка...</div></div>
+<div class="grid" id="grid"></div>
 <div class="modal hidden" id="cart" onclick="if(event.target===this)closeCart()">
   <div class="sheet">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -445,9 +458,20 @@ async function loadCats(){
 }
 
 async function loadProducts(){
+  const g = document.getElementById('grid');
+  
+  // 1. Показываем скелетоны перед загрузкой
+  g.innerHTML = `
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+  `;
+
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
-  const g = document.getElementById('grid');
+  
+  // 2. Убираем скелетоны и показываем товары
   if (!PRODUCTS.length){
     g.innerHTML = '<div class="empty" style="grid-column:1/-1">Товаров нет</div>'; return;
   }

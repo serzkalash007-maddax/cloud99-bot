@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-База данных: Supabase (PostgreSQL) через psycopg.
-Исправлены: сериализация дат, проверка соединения.
+База данных: Supabase (PostgreSQL). Фото: Telegram file_id.
 """
 
 import asyncio, os, logging, traceback
@@ -29,7 +28,6 @@ HOST       = "0.0.0.0"
 
 DISCOUNT_PERCENT = 15
 DISCOUNT_MIN_SUM = 35.0
-
 IMAGES_DIR = Path("images"); IMAGES_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -47,7 +45,6 @@ async def get_pool():
     global pool
     if pool is None:
         dsn = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
-        # check=... проверяет, что соединение живое, перед выдачей
         pool = AsyncConnectionPool(
             dsn, min_size=1, max_size=5, open=False,
             check=AsyncConnectionPool.check_connection
@@ -60,46 +57,23 @@ async def init_db():
     async with p.connection() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS categories(
-            id SERIAL PRIMARY KEY,
-            title TEXT UNIQUE NOT NULL,
-            emoji TEXT DEFAULT '',
-            sort  INTEGER DEFAULT 0
+            id SERIAL PRIMARY KEY, title TEXT UNIQUE NOT NULL, emoji TEXT DEFAULT '', sort INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS products(
-            id SERIAL PRIMARY KEY,
-            category_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            price REAL NOT NULL,
-            image TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL,
+            description TEXT DEFAULT '', price REAL NOT NULL, image TEXT DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS orders(
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT,
-            username TEXT,
-            items TEXT,
-            total REAL,
-            status TEXT DEFAULT 'new',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id SERIAL PRIMARY KEY, user_id BIGINT, username TEXT, items TEXT, total REAL,
+            status TEXT DEFAULT 'new', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE IF NOT EXISTS admins(
-            user_id BIGINT PRIMARY KEY,
-            username TEXT
-        );
-        CREATE TABLE IF NOT EXISTS stickers(
-            user_id BIGINT PRIMARY KEY,
-            count INTEGER DEFAULT 0,
-            discount_active INTEGER DEFAULT 0
-        );
+        CREATE TABLE IF NOT EXISTS admins(user_id BIGINT PRIMARY KEY, username TEXT);
+        CREATE TABLE IF NOT EXISTS stickers(user_id BIGINT PRIMARY KEY, count INTEGER DEFAULT 0, discount_active INTEGER DEFAULT 0);
         """)
         for t, e, s in [("ЖИДКОСТИ","💧",1), ("РАСХОДНИКИ","🔧",2), ("ПОДЫ","💨",3)]:
-            await conn.execute(
-                "INSERT INTO categories(title,emoji,sort) VALUES(%s,%s,%s) ON CONFLICT (title) DO NOTHING",
-                (t, e, s)
-            )
+            await conn.execute("INSERT INTO categories(title,emoji,sort) VALUES(%s,%s,%s) ON CONFLICT (title) DO NOTHING", (t, e, s))
         await conn.commit()
-    log.info("DB initialized (Supabase via psycopg)")
+    log.info("DB initialized")
 
 async def get_categories():
     p = await get_pool()
@@ -322,9 +296,7 @@ async def add_price(m: Message, state: FSMContext):
 async def add_photo(m: Message, state: FSMContext):
     image = ""
     if m.photo:
-        f = await bot.get_file(m.photo[-1].file_id)
-        image = f"images/{m.photo[-1].file_id}.jpg"
-        await bot.download_file(f.file_path, image)
+        image = m.photo[-1].file_id  # Сохраняем ID файла из Telegram
     d = await state.get_data()
     await add_product(d["cat"], d["title"], d["desc"], d["price"], image)
     await m.answer(f"✅ «{d['title']}» добавлен."); await state.clear()
@@ -358,7 +330,7 @@ async def edit_save(m: Message, state: FSMContext):
     d = await state.get_data(); field, pid = d["field"], d["pid"]
     if field == "image":
         if m.photo:
-            f = await bot.get_file(m.photo[-1].file_id); val = f"images/{m.photo[-1].file_id}.jpg"; await bot.download_file(f.file_path, val)
+            val = m.photo[-1].file_id  # Сохраняем ID файла из Telegram
         else: val = ""
     elif field == "price": val = float(m.text.replace(",", "."))
     else: val = m.text.strip()
@@ -622,7 +594,7 @@ async function loadProducts(){
   }
   g.innerHTML = PRODUCTS.map(p=>`
     <div class="card">
-      ${p.image ? `<img src="/${p.image}" alt="">` : `<div class="ph">📦</div>`}
+      ${p.image ? `<img src="/images/${p.image}" onerror="this.src='https://api.telegram.org/file/bot${BOT_TOKEN}/${p.image}'; this.onerror=null;" alt="">` : `<div class="ph">📦</div>`}
       <div class="t">${escape(p.title)}</div>
       <div class="p">${money(p.price)}</div>
       <button class="btn primary add" onclick="addToCart(${p.id})">В корзину</button>
@@ -829,7 +801,11 @@ async def handle_profile(req):
     return web.json_response({"orders": orders, "stats": await get_user_stats(uid)})
 
 async def handle_image(req):
-    name = req.match_info["name"]; path = IMAGES_DIR / name
+    name = req.match_info["name"]
+    # Редирект на Telegram, если это file_id
+    if not name.endswith('.jpg') and not name.endswith('.png'):
+        return web.HTTPFound(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{name}")
+    path = IMAGES_DIR / name
     if not path.exists(): return web.Response(status=404)
     return web.FileResponse(path)
 

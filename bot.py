@@ -384,7 +384,6 @@ HTML = r"""<!DOCTYPE html>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;font-family:var(--font)}
 html,body{
   margin:0;
-  /* ГАРАНТИРОВАННЫЙ ЦВЕТНОЙ ФОН */
   background-color: var(--bg-color);
   background-image: radial-gradient(circle at 10% 20%, rgba(0, 240, 255, 0.15) 0%, transparent 40%),
                     radial-gradient(circle at 90% 80%, rgba(0, 119, 255, 0.15) 0%, transparent 40%);
@@ -395,6 +394,8 @@ html,body{
   min-height:100vh;
   overflow-x:hidden;
 }
+::-webkit-scrollbar { width: 0px; }
+
 .topbar{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;position:sticky;top:0;background:rgba(10, 22, 34, 0.8);backdrop-filter:blur(20px);z-index:20;border-bottom:1px solid var(--glass-border)}
 .logo{font-weight:900;letter-spacing:2px;font-size:22px;color:var(--accent);text-shadow:0 0 15px var(--accent-glow)}
 .topbar-right{display:flex;gap:12px;align-items:center}
@@ -403,7 +404,13 @@ html,body{
 .cart-btn span{color:var(--accent)}
 .badge{position:absolute;top:-4px;right:-4px;background:var(--accent);color:#000;border-radius:50%;width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:900;box-shadow:0 0 10px var(--accent-glow)}
 .cart-btn{position:relative}
-.cats{display:flex;gap:10px;overflow-x:auto;padding:16px 20px;scrollbar-width:none}
+
+/* ПОИСК */
+.search-bar{padding:0 20px 16px}
+.search-input{width:100%;padding:12px 16px;border-radius:12px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-main);font-size:14px;outline:none;backdrop-filter:blur(10px);transition:.2s}
+.search-input:focus{border-color:var(--accent);box-shadow:0 0 15px var(--accent-glow)}
+
+.cats{display:flex;gap:10px;overflow-x:auto;padding:0 20px 16px;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
 .cat{flex:0 0 auto;padding:10px 20px;border-radius:30px;background:var(--glass-bg);font-weight:600;font-size:14px;cursor:pointer;border:1px solid var(--glass-border);color:var(--text-main);transition:.3s;backdrop-filter:blur(10px)}
 .cat.active{background:var(--accent-grad);color:#000;border-color:transparent;box-shadow:0 4px 15px var(--accent-glow);font-weight:800}
@@ -426,6 +433,14 @@ html,body{
 .btn.disabled{background:rgba(255,255,255,0.05);color:var(--text-sub);cursor:not-allowed;box-shadow:none;border:1px solid transparent}
 .add{margin-top:auto}
 
+/* Скелетоны */
+.skeleton{background:var(--glass-bg);border-radius:20px;padding:14px;border:1px solid var(--glass-border);display:flex;flex-direction:column;gap:10px}
+.sk-img{width:100%;aspect-ratio:1/1;border-radius:14px;background:rgba(255,255,255,0.05);animation:pulse 1.5s infinite}
+.sk-title{height:15px;width:80%;background:rgba(255,255,255,0.05);border-radius:4px;animation:pulse 1.5s infinite}
+.sk-price{height:18px;width:40%;background:rgba(255,255,255,0.05);border-radius:4px;animation:pulse 1.5s infinite}
+.sk-btn{height:40px;width:100%;background:rgba(255,255,255,0.05);border-radius:12px;animation:pulse 1.5s infinite;margin-top:auto}
+@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+
 .modal{position:fixed;inset:0;background:rgba(10, 22, 34, 0.7);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(10px)}
 .modal.hidden{display:none}
 .sheet{background:#0f1d2b;border-radius:24px 24px 0 0;padding:24px;width:100%;max-height:85vh;overflow-y:auto;border-top:2px solid var(--accent);animation:up .3s;box-shadow:0 -10px 50px rgba(0,0,0,.5)}
@@ -442,8 +457,17 @@ html,body{
 .total{font-size:18px;margin:20px 0;padding-top:20px;border-top:1px solid var(--glass-border);display:flex;justify-content:space-between;align-items:center;font-weight:800}
 .total b{font-size:24px;color:var(--accent);text-shadow:0 0 10px var(--accent-glow)}
 .discount-line{color:#000;font-size:14px;margin-top:10px;padding:10px;background:var(--accent);border-radius:10px;font-weight:800;text-align:center;box-shadow:0 0 20px var(--accent-glow)}
-.empty{text-align:center;color:var(--text-sub);padding:50px 0;font-size:16px}
+.empty{text-align:center;color:var(--text-sub);padding:50px 0;font-size:16px;display:flex;flex-direction:column;align-items:center;gap:16px}
+.empty-icon{font-size:64px;filter:drop-shadow(0 0 10px rgba(255,255,255,0.1))}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--accent-grad);color:#000;padding:14px 24px;border-radius:14px;font-weight:800;z-index:200;box-shadow:0 8px 25px var(--accent-glow);animation:fadeIn .2s;font-size:14px}
+
+/* Анимация корзины */
+@keyframes cartBounce {
+    0%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-8px) scale(1.05); }
+    60% { transform: translateY(4px) scale(0.98); }
+}
+.cart-btn.bump { animation: cartBounce 0.4s ease; border-color: var(--accent); box-shadow: 0 0 15px var(--accent-glow); }
 
 .profile-card{background:var(--glass-bg);border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid var(--glass-border);backdrop-filter:blur(10px)}
 .avatar{width:70px;height:70px;border-radius:50%;background:var(--accent-grad);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;color:#000;margin-bottom:16px;overflow:hidden;border:2px solid var(--accent);box-shadow:0 0 15px var(--accent-glow)}
@@ -480,13 +504,23 @@ html,body{
   <div class="logo">CLOUD99</div>
   <div class="topbar-right">
     <div class="profile-btn" onclick="openProfile()">👤</div>
-    <div class="cart-btn" onclick="openCart()">🛒 <span id="cc">0</span><div class="badge" id="cb" style="display:none">0</div></div>
+    <div class="cart-btn" id="cartBtn" onclick="openCart()">🛒 <span id="cc">0</span><div class="badge" id="cb" style="display:none">0</div></div>
   </div>
 </div>
+
+<!-- Поиск -->
+<div class="search-bar">
+  <input type="text" id="searchInput" class="search-input" placeholder="🔍 Поиск товара..." oninput="filterProducts()">
+</div>
+
 <div class="cats" id="cats"></div>
 <div class="grid" id="grid">
-    <div class="loader" style="grid-column:1/-1;text-align:center;padding:50px 0"><div class="loader-spinner" style="width:40px;height:40px;border:4px solid var(--glass-border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 14px"></div><div class="loader-text" style="color:var(--accent);font-size:12px;letter-spacing:2px;text-transform:uppercase;animation:pulse 1.5s infinite">СИНХРОНИЗАЦИЯ...</div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
 </div>
+
 <div class="modal hidden" id="cart" onclick="if(event.target===this)closeCart()">
   <div class="sheet">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -504,6 +538,7 @@ html,body{
   <div class="sheet">
     <h2>👤 Личный кабинет</h2><div id="profileContent">Загрузка...</div>
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px" onclick="closeProfile()">Закрыть</button>
+    <button class="btn primary" style="width:100%;padding:12px;margin-top:10px" onclick="window.open('https://t.me/ВАШ_ЮЗЕРНЕЙМ', '_blank')">💬 Написать нам</button>
   </div>
 </div>
 <div id="productModal" style="display:none" class="product-modal" onclick="if(event.target===this)closeProductModal()"></div>
@@ -512,7 +547,7 @@ html,body{
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 const API = location.origin;
-let CATS = [], PRODUCTS = [], CART = JSON.parse(localStorage.getItem('c99')||'{}');
+let CATS = [], PRODUCTS = [], FILTERED = [], CART = JSON.parse(localStorage.getItem('c99')||'{}');
 let CURRENT_CAT = null, USER_DISCOUNT = false;
 const DISCOUNT_PERCENT = 15, DISCOUNT_MIN_SUM = 35;
 
@@ -530,18 +565,29 @@ async function loadCats(){
 
 async function loadProducts(){
   const g = document.getElementById('grid');
-  g.innerHTML = `<div class="loader" style="grid-column:1/-1;text-align:center;padding:50px 0"><div class="loader-spinner" style="width:40px;height:40px;border:4px solid var(--glass-border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 14px"></div><div class="loader-text" style="color:var(--accent);font-size:12px;letter-spacing:2px;text-transform:uppercase;animation:pulse 1.5s infinite">СИНХРОНИЗАЦИЯ...</div></div>`;
-  
-  await new Promise(r => setTimeout(r, 300));
+  g.innerHTML = `
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+    <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
+  `;
   
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
+  FILTERED = [...PRODUCTS];
+  filterProducts();
+}
+
+function filterProducts() {
+  const query = document.getElementById('searchInput').value.toLowerCase();
+  const g = document.getElementById('grid');
   
-  if (!PRODUCTS.length){
-    g.innerHTML = '<div class="empty" style="grid-column:1/-1">Товаров нет</div>'; return;
+  FILTERED = PRODUCTS.filter(p => p.title.toLowerCase().includes(query));
+  
+  if (!FILTERED.length){
+    g.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🔍</div>Ничего не найдено</div>'; 
+    return;
   }
   
-  g.innerHTML = PRODUCTS.map((p,i)=>`
+  g.innerHTML = FILTERED.map((p,i)=>`
     <div class="card" style="animation-delay:${i*0.05}s" onclick="openProduct(${p.id})">
       ${p.image ? `<img src="/tgimg/${p.image}" alt="">` : `<div class="ph">📦</div>`}
       <div class="t">${escape(p.title)}</div>
@@ -589,7 +635,15 @@ function addToCart(id){
   const p = PRODUCTS.find(x=>x.id===id);
   if (!p || p.stock <= 0) return;
   if (CART[id]) CART[id].qty++; else CART[id] = {id, title:p.title, price:p.price, qty:1};
-  saveCart(); updateBadge(); toast('В корзине ✓');
+  saveCart(); updateBadge(); 
+  
+  // Анимация корзины
+  const cb = document.getElementById('cartBtn');
+  cb.classList.remove('bump');
+  void cb.offsetWidth;
+  cb.classList.add('bump');
+  
+  toast('В корзине ✓');
 }
 
 function updateBadge(){
@@ -603,6 +657,9 @@ async function checkDiscount(){
   const u = tg?.initDataUnsafe?.user; if (!u) return;
   const res = await api('/api/profile/'+u.id);
   USER_DISCOUNT = res.stats?.discount_active || false;
+  if (USER_DISCOUNT) {
+      document.querySelector('.profile-btn').classList.add('pulse');
+  }
 }
 
 function calcTotals(){
@@ -618,7 +675,9 @@ async function openCart(){
   await checkDiscount();
   const box = document.getElementById('ci');
   const items = Object.values(CART);
-  if (!items.length){ box.innerHTML = '<div class="empty">Корзина пуста</div>'; }
+  if (!items.length){ 
+    box.innerHTML = '<div class="empty"><div class="empty-icon">🛒</div>Корзина пуста</div>'; 
+  }
   else {
     box.innerHTML = items.map(i=>`
       <div class="ci">

@@ -662,23 +662,32 @@ function doSpin() {
     // Шансы: 5% (4%), 10% (3%), 15% (3%), Пусто (90%)
     const chance = Math.random() * 100;
     let discount = 0;
-    let winAngle = 0;
+    let targetAngle = 0;
     
+    // Определяем сектор и УГОЛ ЦЕНТРА сектора (в градусах)
+    // 0° — сверху (Пусто), 90° — справа (15%), 180° — снизу (10%), 270° — слева (5%)
     if (chance < 4) { 
-        discount = 5; winAngle = 180; // Сектор 5% (слева)
+        discount = 5; 
+        targetAngle = 270; // 5% (слева)
     } else if (chance < 7) { 
-        discount = 10; winAngle = 270; // Сектор 10% (снизу)
+        discount = 10; 
+        targetAngle = 180; // 10% (снизу)
     } else if (chance < 10) { 
-        discount = 15; winAngle = 90; // Сектор 15% (справа)
+        discount = 15; 
+        targetAngle = 90; // 15% (справа)
     } else { 
-        discount = 0; winAngle = 0; // Пусто (сверху)
+        discount = 0; 
+        targetAngle = 0; // Пусто (сверху)
     }
     
-    // Крутим: + 5 полных оборотов (1800 градусов)
-    const spinDeg = 1800 + (360 - winAngle);
+    // --- МАГИЯ ОСТАНОВКИ ПО ЦЕНТРУ ---
+    const offset = 45; // Смещение, чтобы попасть в центр сектора
+    const randomSpins = Math.floor(Math.random() * 5) + 4; // Случайное кол-во оборотов (4-8)
+    const baseRotation = randomSpins * 360;
+    const finalAngle = baseRotation + (360 - targetAngle) + offset;
     
     const svg = document.getElementById('wheelSvg');
-    svg.style.transform = `rotate(${spinDeg}deg)`;
+    svg.style.transform = `rotate(${finalAngle}deg)`;
     
     setTimeout(() => {
         if (discount > 0) {
@@ -688,7 +697,6 @@ function doSpin() {
         } else {
             document.getElementById('wheelResultText').textContent = `😢 Пусто. +1 стикер ⭐`;
             toast(`Пусто. +1 стикер!`);
-            // Здесь можно отправить запрос боту на +1 стикер, если нужно
         }
         
         if (ws.extra > 0) ws.extra--;
@@ -697,7 +705,6 @@ function doSpin() {
         localStorage.setItem('wheel_status', JSON.stringify(ws));
         btn.disabled = false;
         
-        // Обновляем состояние в профиле
         updateWheelStatusUI();
     }, 4200);
 }

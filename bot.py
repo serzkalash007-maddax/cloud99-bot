@@ -2,6 +2,7 @@
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
 База данных: Supabase (PostgreSQL) через psycopg.
+Исправлены: сериализация дат, проверка соединения.
 """
 
 import asyncio, os, logging, traceback
@@ -45,9 +46,12 @@ pool = None
 async def get_pool():
     global pool
     if pool is None:
-        # Заменяем префикс для psycopg
         dsn = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
-        pool = AsyncConnectionPool(dsn, min_size=1, max_size=5, open=False)
+        # check=... проверяет, что соединение живое, перед выдачей
+        pool = AsyncConnectionPool(
+            dsn, min_size=1, max_size=5, open=False,
+            check=AsyncConnectionPool.check_connection
+        )
         await pool.open()
     return pool
 
@@ -772,9 +776,14 @@ loadCats(); loadProducts(); updateBadge();
 async def handle_index(req): return web.Response(text=HTML, content_type="text/html")
 async def handle_health(req): return web.Response(text="ok")
 async def handle_categories(req): return web.json_response(await get_categories())
+
 async def handle_products(req):
     cat = req.query.get("cat")
-    return web.json_response(await get_products(int(cat) if cat else None))
+    products = await get_products(int(cat) if cat else None)
+    for p in products:
+        if p.get("created_at"):
+            p["created_at"] = str(p["created_at"])
+    return web.json_response(products)
 
 async def handle_order(req):
     data = await req.json()
@@ -813,7 +822,11 @@ async def handle_order(req):
 
 async def handle_profile(req):
     uid = int(req.match_info["uid"])
-    return web.json_response({"orders": await get_orders(uid), "stats": await get_user_stats(uid)})
+    orders = await get_orders(uid)
+    for o in orders:
+        if o.get("created_at"):
+            o["created_at"] = str(o["created_at"])
+    return web.json_response({"orders": orders, "stats": await get_user_stats(uid)})
 
 async def handle_image(req):
     name = req.match_info["name"]; path = IMAGES_DIR / name

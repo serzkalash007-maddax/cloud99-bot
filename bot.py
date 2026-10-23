@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-CLOUD99 — Telegram-бот + WebApp магазин.
-База данных: Supabase (PostgreSQL). Фото: Telegram file_id.
-"""
-
 import asyncio, os, logging, traceback
 from pathlib import Path
 from aiohttp import web
@@ -28,7 +23,6 @@ HOST       = "0.0.0.0"
 
 DISCOUNT_PERCENT = 15
 DISCOUNT_MIN_SUM = 35.0
-IMAGES_DIR = Path("images"); IMAGES_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("cloud99")
@@ -95,10 +89,7 @@ async def get_products(cat_id=None):
 async def add_product(cat_id, title, desc, price, image):
     p = await get_pool()
     async with p.connection() as conn:
-        await conn.execute(
-            "INSERT INTO products(category_id,title,description,price,image) VALUES(%s,%s,%s,%s,%s)",
-            (cat_id, title, desc, price, image)
-        )
+        await conn.execute("INSERT INTO products(category_id,title,description,price,image) VALUES(%s,%s,%s,%s,%s)", (cat_id, title, desc, price, image))
         await conn.commit()
 
 async def update_product(pid, field, value):
@@ -118,10 +109,7 @@ async def create_order(uid, uname, items, total):
     p = await get_pool()
     async with p.connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                "INSERT INTO orders(user_id,username,items,total) VALUES(%s,%s,%s,%s) RETURNING id",
-                (uid, uname, items, total)
-            )
+            await cur.execute("INSERT INTO orders(user_id,username,items,total) VALUES(%s,%s,%s,%s) RETURNING id", (uid, uname, items, total))
             row = await cur.fetchone()
             await conn.commit()
             return row[0]
@@ -153,28 +141,18 @@ async def is_admin(uid):
 async def add_admin(uid, uname):
     p = await get_pool()
     async with p.connection() as conn:
-        await conn.execute(
-            "INSERT INTO admins(user_id,username) VALUES(%s,%s) ON CONFLICT (user_id) DO NOTHING",
-            (uid, uname or "")
-        )
+        await conn.execute("INSERT INTO admins(user_id,username) VALUES(%s,%s) ON CONFLICT (user_id) DO NOTHING", (uid, uname or ""))
         await conn.commit()
 
 async def get_user_stats(uid):
     p = await get_pool()
     async with p.connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT COUNT(*) FROM orders WHERE user_id=%s AND status IN ('confirmed','shipping','ready')", (uid,)
-            )
+            await cur.execute("SELECT COUNT(*) FROM orders WHERE user_id=%s AND status IN ('confirmed','shipping','ready')", (uid,))
             orders_count = (await cur.fetchone())[0]
-            
             await cur.execute("SELECT count, discount_active FROM stickers WHERE user_id=%s", (uid,))
             st = await cur.fetchone()
-            if st:
-                stickers, discount = st[0], st[1]
-            else:
-                stickers, discount = 0, 0
-            return {"orders": orders_count or 0, "stickers": stickers, "discount_active": bool(discount)}
+            return {"orders": orders_count or 0, "stickers": st[0] if st else 0, "discount_active": bool(st[1]) if st else False}
 
 async def add_sticker(uid):
     p = await get_pool()
@@ -184,20 +162,15 @@ async def add_sticker(uid):
             st = await cur.fetchone()
             if not st:
                 await cur.execute("INSERT INTO stickers(user_id,count) VALUES(%s,1)", (uid,))
-                await conn.commit()
-                return 1, False
+                await conn.commit(); return 1, False
             count = st[0] + 1
             await cur.execute("UPDATE stickers SET count=%s WHERE user_id=%s", (count, uid))
-            await conn.commit()
-            return count, count >= 10
+            await conn.commit(); return count, count >= 10
 
 async def reset_stickers(uid):
     p = await get_pool()
     async with p.connection() as conn:
-        await conn.execute("""
-            INSERT INTO stickers(user_id, count, discount_active) VALUES(%s, 0, 1)
-            ON CONFLICT(user_id) DO UPDATE SET count=0, discount_active=1
-        """, (uid,))
+        await conn.execute("INSERT INTO stickers(user_id, count, discount_active) VALUES(%s, 0, 1) ON CONFLICT(user_id) DO UPDATE SET count=0, discount_active=1", (uid,))
         await conn.commit()
 
 async def use_discount(uid):
@@ -219,27 +192,20 @@ class EditP(StatesGroup):
 
 def admin_menu():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="➕ Добавить товар")],
-        [KeyboardButton(text="✏️ Редактировать")],
-        [KeyboardButton(text="🗑 Удалить")],
-        [KeyboardButton(text="📦 Заказы")],
-        [KeyboardButton(text="⬅️ Выйти")]
+        [KeyboardButton(text="➕ Добавить товар")], [KeyboardButton(text="✏️ Редактировать")],
+        [KeyboardButton(text="🗑 Удалить")], [KeyboardButton(text="📦 Заказы")], [KeyboardButton(text="⬅️ Выйти")]
     ], resize_keyboard=True)
 
 @dp.message(CommandStart())
 async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
-    u = m.from_user
-    if u.id == ADMIN_ID: await add_admin(u.id, u.username)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))
-    ]])
-    await m.answer(f"<b>CLOUD99</b>\n\nПривет, {u.first_name}! Открой магазин 👇", reply_markup=kb)
+    if m.from_user.id == ADMIN_ID: await add_admin(m.from_user.id, m.from_user.username)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))]])
+    await m.answer(f"<b>CLOUD99</b>\n\nПривет, {m.from_user.first_name}! Открой магазин 👇", reply_markup=kb)
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(m: Message, state: FSMContext):
-    await state.clear()
-    await m.answer("Отменено.", reply_markup=admin_menu() if await is_admin(m.from_user.id) else None)
+    await state.clear(); await m.answer("Отменено.", reply_markup=admin_menu() if await is_admin(m.from_user.id) else None)
 
 @dp.message(Command("admin"))
 async def cmd_admin(m: Message, state: FSMContext):
@@ -254,10 +220,8 @@ async def cmd_reset_stickers(m: Message):
     if len(parts) < 2: return await m.answer("Использование: <code>/reset_stickers USER_ID</code>")
     try: uid = int(parts[1])
     except ValueError: return await m.answer("ID должен быть числом.")
-    await reset_stickers(uid)
-    await m.answer(f"✅ Стикеры клиента <code>{uid}</code> обнулены.")
-    try:
-        await bot.send_message(uid, f"🎉 <b>Вы собрали 10 отметок!</b>\n\nСкидка <b>{DISCOUNT_PERCENT}%</b> на заказ от <b>{DISCOUNT_MIN_SUM:.0f} BYN</b> активирована.")
+    await reset_stickers(uid); await m.answer(f"✅ Стикеры <code>{uid}</code> обнулены.")
+    try: await bot.send_message(uid, f"🎉 <b>Вы собрали 10 отметок!</b>\n\nСкидка <b>{DISCOUNT_PERCENT}%</b> на заказ от <b>{DISCOUNT_MIN_SUM:.0f} BYN</b> активирована.")
     except: pass
 
 @dp.message(F.text == "⬅️ Выйти")
@@ -274,9 +238,7 @@ async def add_begin(m: Message):
 
 @dp.callback_query(F.data.startswith("ac:"))
 async def add_cat(c: CallbackQuery, state: FSMContext):
-    await state.update_data(cat=int(c.data.split(":")[1]))
-    await state.set_state(AddP.title)
-    await c.message.edit_text("Название товара:")
+    await state.update_data(cat=int(c.data.split(":")[1])); await state.set_state(AddP.title); await c.message.edit_text("Название товара:")
 
 @dp.message(AddP.title)
 async def add_title(m: Message, state: FSMContext):
@@ -295,11 +257,8 @@ async def add_price(m: Message, state: FSMContext):
 @dp.message(AddP.photo, F.photo | F.text)
 async def add_photo(m: Message, state: FSMContext):
     image = ""
-    if m.photo:
-        image = m.photo[-1].file_id  # Сохраняем ID файла из Telegram
-    d = await state.get_data()
-    await add_product(d["cat"], d["title"], d["desc"], d["price"], image)
-    await m.answer(f"✅ «{d['title']}» добавлен."); await state.clear()
+    if m.photo: image = m.photo[-1].file_id # Сохраняем ID из Telegram
+    d = await state.get_data(); await add_product(d["cat"], d["title"], d["desc"], d["price"], image); await m.answer(f"✅ «{d['title']}» добавлен."); await state.clear()
 
 @dp.message(F.text == "✏️ Редактировать")
 async def edit_list(m: Message):
@@ -313,29 +272,23 @@ async def edit_list(m: Message):
 async def edit_field(c: CallbackQuery):
     pid = c.data.split(":")[1]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Название", callback_data=f"ef:{pid}:title")],
-        [InlineKeyboardButton(text="Описание", callback_data=f"ef:{pid}:description")],
-        [InlineKeyboardButton(text="Цена", callback_data=f"ef:{pid}:price")],
-        [InlineKeyboardButton(text="Фото", callback_data=f"ef:{pid}:image")],
+        [InlineKeyboardButton(text="Название", callback_data=f"ef:{pid}:title")], [InlineKeyboardButton(text="Описание", callback_data=f"ef:{pid}:description")],
+        [InlineKeyboardButton(text="Цена", callback_data=f"ef:{pid}:price")], [InlineKeyboardButton(text="Фото", callback_data=f"ef:{pid}:image")]
     ])
     await c.message.edit_text("Что меняем?", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("ef:"))
 async def edit_prompt(c: CallbackQuery, state: FSMContext):
-    _, pid, field = c.data.split(":"); await state.update_data(pid=int(pid), field=field); await state.set_state(EditP.val)
-    await c.message.edit_text(f"Новое ({field}):")
+    _, pid, field = c.data.split(":"); await state.update_data(pid=int(pid), field=field); await state.set_state(EditP.val); await c.message.edit_text(f"Новое ({field}):")
 
 @dp.message(EditP.val, F.photo | F.text)
 async def edit_save(m: Message, state: FSMContext):
     d = await state.get_data(); field, pid = d["field"], d["pid"]
     if field == "image":
-        if m.photo:
-            val = m.photo[-1].file_id  # Сохраняем ID файла из Telegram
-        else: val = ""
+        val = m.photo[-1].file_id if m.photo else ""
     elif field == "price": val = float(m.text.replace(",", "."))
     else: val = m.text.strip()
-    await update_product(pid, field, val)
-    await m.answer("✅ Обновлено."); await state.clear()
+    await update_product(pid, field, val); await m.answer("✅ Обновлено."); await state.clear()
 
 @dp.message(F.text == "🗑 Удалить")
 async def del_list(m: Message):
@@ -365,16 +318,13 @@ async def orders(m: Message):
         else: kb = None
         await m.answer(f"<b>Заказ #{o['id']}</b> [{status}]\n👤 {o['username']}\n📦 {o['items']}\n💰 {o['total']:.2f} BYN", reply_markup=kb)
 
-# ---------- СТАТУСЫ ----------
 @dp.callback_query(F.data.startswith("confirm:"))
 async def order_confirm(c: CallbackQuery):
     _, oid, uid = c.data.split(":"); oid = int(oid); uid = int(uid)
-    await update_order_status(oid, "confirmed")
-    new_count, reached_10 = await add_sticker(uid)
+    await update_order_status(oid, "confirmed"); new_count, reached_10 = await add_sticker(uid)
     try: await bot.send_message(uid, f"✅ <b>Заказ #{oid} подтверждён!</b>")
     except: pass
-    await c.message.edit_reply_markup(reply_markup=None)
-    await c.message.answer(f"✅ Заказ #{oid} подтверждён. Стикеров: <b>{new_count}/10</b>.")
+    await c.message.edit_reply_markup(reply_markup=None); await c.message.answer(f"✅ Заказ #{oid} подтверждён. Стикеров: <b>{new_count}/10</b>.")
     if reached_10:
         try: await bot.send_message(ADMIN_ID, f"🎯 Клиент набрал 10 стикеров!\n/reset_stickers {uid}")
         except: pass
@@ -385,8 +335,7 @@ async def order_shipping(c: CallbackQuery):
     await update_order_status(oid, "shipping")
     try: await bot.send_message(uid, f"🚚 <b>Заказ #{oid} в пути!</b>")
     except: pass
-    await c.message.edit_reply_markup(reply_markup=None)
-    await c.message.answer(f"🚚 Заказ #{oid} в пути.")
+    await c.message.edit_reply_markup(reply_markup=None); await c.message.answer(f"🚚 Заказ #{oid} в пути.")
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def order_reject(c: CallbackQuery):
@@ -394,12 +343,10 @@ async def order_reject(c: CallbackQuery):
     await update_order_status(oid, "rejected")
     try: await bot.send_message(uid, f"❌ <b>Заказ #{oid} отклонён.</b>")
     except: pass
-    await c.message.edit_reply_markup(reply_markup=None)
-    await c.message.answer(f"❌ Заказ #{oid} отклонён.")
+    await c.message.edit_reply_markup(reply_markup=None); await c.message.answer(f"❌ Заказ #{oid} отклонён.")
 
 @dp.error()
-async def global_error(event, exception):
-    log.error(f"ERROR: {exception}\n{traceback.format_exc()}")
+async def global_error(event, exception): log.error(f"ERROR: {exception}\n{traceback.format_exc()}")
 
 HTML = r"""<!DOCTYPE html>
 <html lang="ru">
@@ -409,126 +356,50 @@ HTML = r"""<!DOCTYPE html>
 <title>CLOUD99</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{
-  --bg:#1a1d16; --card:#242820; --card2:#2c3026;
-  --olive:#4a5535; --olive2:#5d6b42; --sand:#c9b487;
-  --accent:#8b9556; --accent2:#a8b56a;
-  --text:#e8e6d8; --muted:#8a8a72;
-  --sd:#0d0f0a; --sl:#363a2e; --r:14px;
-  --danger:#a04a3a;
-}
+:root{--bg:#1a1d16;--card:#242820;--card2:#2c3026;--olive:#4a5535;--olive2:#5d6b42;--sand:#c9b487;--accent:#8b9556;--accent2:#a8b56a;--text:#e8e6d8;--muted:#8a8a72;--sd:#0d0f0a;--sl:#363a2e;--r:14px;--danger:#a04a3a}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--text);
-  font-family:"Courier New",Courier,monospace;padding-bottom:90px;min-height:100vh;
-  background-image:
-    linear-gradient(rgba(139,149,86,.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(139,149,86,.04) 1px, transparent 1px);
-  background-size:20px 20px;}
-.topbar{display:flex;justify-content:space-between;align-items:center;
-  padding:14px 16px;position:sticky;top:0;background:rgba(26,29,22,.95);
-  backdrop-filter:blur(10px);z-index:20;border-bottom:2px solid var(--olive)}
-.logo{font-weight:900;letter-spacing:3px;font-size:18px;color:var(--sand);
-  text-transform:uppercase;text-shadow:1px 1px 0 var(--sd)}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier New",Courier,monospace;padding-bottom:90px;min-height:100vh;background-image:linear-gradient(rgba(139,149,86,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(139,149,86,.04) 1px,transparent 1px);background-size:20px 20px}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;position:sticky;top:0;background:rgba(26,29,22,.95);backdrop-filter:blur(10px);z-index:20;border-bottom:2px solid var(--olive)}
+.logo{font-weight:900;letter-spacing:3px;font-size:18px;color:var(--sand);text-transform:uppercase;text-shadow:1px 1px 0 var(--sd)}
 .logo:before{content:"◤ ";color:var(--accent2)}
 .topbar-right{display:flex;gap:8px;align-items:center}
-.profile-btn,.cart-btn{background:var(--card);padding:10px 14px;border-radius:8px;
-  box-shadow:3px 3px 0 var(--sd);cursor:pointer;border:1px solid var(--olive);
-  color:var(--text);font-family:inherit;font-weight:700}
-.cart-btn span{color:var(--accent2)}
-.badge{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;
-  border-radius:50%;width:22px;height:22px;font-size:12px;display:flex;
-  align-items:center;justify-content:center;font-weight:900}
-.cart-btn{position:relative}
-.cats{display:flex;gap:8px;overflow-x:auto;padding:14px 16px;scrollbar-width:none}
-.cats::-webkit-scrollbar{display:none}
-.cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);
-  font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;
-  box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);
-  color:var(--text);text-transform:uppercase;font-family:inherit}
-.cat.active{background:var(--olive);color:var(--sand);border-color:var(--sand)}
-.cat:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
+.profile-btn,.cart-btn{background:var(--card);padding:10px 14px;border-radius:8px;box-shadow:3px 3px 0 var(--sd);cursor:pointer;border:1px solid var(--olive);color:var(--text);font-family:inherit;font-weight:700}
+.cart-btn span{color:var(--accent2)}.badge{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:900}.cart-btn{position:relative}
+.cats{display:flex;gap:8px;overflow-x:auto;padding:14px 16px;scrollbar-width:none}.cats::-webkit-scrollbar{display:none}
+.cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);color:var(--text);text-transform:uppercase;font-family:inherit}
+.cat.active{background:var(--olive);color:var(--sand);border-color:var(--sand)}.cat:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px}
-.card{background:var(--card);border-radius:var(--r);padding:12px;
-  box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);
-  display:flex;flex-direction:column;gap:8px;position:relative}
-.card:before{content:"";position:absolute;top:6px;right:8px;width:6px;height:6px;
-  background:var(--accent);border-radius:50%}
-.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;
-  background:var(--card2);border:1px solid var(--olive)}
-.ph{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);
-  display:flex;align-items:center;justify-content:center;color:var(--muted);
-  font-size:40px;border:1px solid var(--olive)}
-.card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}
-.card .p{font-size:15px;font-weight:900;color:var(--sand)}
-.btn{border:none;border-radius:8px;padding:11px 14px;font-weight:800;
-  font-size:12px;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;
-  font-family:inherit;transition:.1s}
-.btn.primary{background:var(--olive);color:var(--sand);border:1px solid var(--sand);
-  box-shadow:3px 3px 0 var(--sd)}
-.btn.primary:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
-.btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--olive);
-  box-shadow:3px 3px 0 var(--sd)}
-.btn.ghost:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
+.card{background:var(--card);border-radius:var(--r);padding:12px;box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px;position:relative}
+.card:before{content:"";position:absolute;top:6px;right:8px;width:6px;height:6px;background:var(--accent);border-radius:50%}
+.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:var(--card2);border:1px solid var(--olive)}
+.ph{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:40px;border:1px solid var(--olive)}
+.card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}.card .p{font-size:15px;font-weight:900;color:var(--sand)}
+.btn{border:none;border-radius:8px;padding:11px 14px;font-weight:800;font-size:12px;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;font-family:inherit;transition:.1s}
+.btn.primary{background:var(--olive);color:var(--sand);border:1px solid var(--sand);box-shadow:3px 3px 0 var(--sd)}.btn.primary:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
+.btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}.btn.ghost:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .add{margin-top:auto}
-.modal{position:fixed;inset:0;background:rgba(10,12,8,.85);display:flex;
-  align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(6px)}
-.modal.hidden{display:none}
-.sheet{background:var(--card);border-radius:14px 14px 0 0;padding:22px;
-  width:100%;max-height:85vh;overflow-y:auto;border-top:3px solid var(--olive);
-  animation:up .2s}
+.modal{position:fixed;inset:0;background:rgba(10,12,8,.85);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(6px)}.modal.hidden{display:none}
+.sheet{background:var(--card);border-radius:14px 14px 0 0;padding:22px;width:100%;max-height:85vh;overflow-y:auto;border-top:3px solid var(--olive);animation:up .2s}
 @keyframes up{from{transform:translateY(40px)}to{transform:translateY(0)}}
-.sheet h2{margin:0 0 16px;font-size:18px;color:var(--sand);
-  text-transform:uppercase;letter-spacing:2px;
-  border-bottom:1px dashed var(--olive);padding-bottom:10px}
-.ci{display:flex;justify-content:space-between;align-items:center;
-  padding:12px 0;border-bottom:1px dashed var(--olive);gap:10px}
-.ci .info{flex:1}
-.ci .info b{display:block;font-size:13px}
-.ci .info span{font-size:12px;color:var(--muted)}
-.qty{display:flex;gap:6px;align-items:center}
-.qty button{width:30px;height:30px;border-radius:6px;
-  border:1px solid var(--olive);background:var(--card2);color:var(--sand);
-  font-size:16px;font-weight:900;cursor:pointer;font-family:inherit}
-.qty span{min-width:20px;text-align:center;font-weight:800}
-.total{font-size:16px;margin:18px 0;padding-top:16px;
-  border-top:2px solid var(--olive);display:flex;justify-content:space-between;
-  text-transform:uppercase;letter-spacing:1px}
-.total b{color:var(--sand)}
-.discount-line{color:var(--sand);font-size:13px;margin-top:8px;
-  padding:8px;background:var(--olive);border-radius:6px;
-  text-transform:uppercase;letter-spacing:1px;font-weight:800}
+.sheet h2{margin:0 0 16px;font-size:18px;color:var(--sand);text-transform:uppercase;letter-spacing:2px;border-bottom:1px dashed var(--olive);padding-bottom:10px}
+.ci{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px dashed var(--olive);gap:10px}
+.ci .info{flex:1}.ci .info b{display:block;font-size:13px}.ci .info span{font-size:12px;color:var(--muted)}
+.qty{display:flex;gap:6px;align-items:center}.qty button{width:30px;height:30px;border-radius:6px;border:1px solid var(--olive);background:var(--card2);color:var(--sand);font-size:16px;font-weight:900;cursor:pointer;font-family:inherit}.qty span{min-width:20px;text-align:center;font-weight:800}
+.total{font-size:16px;margin:18px 0;padding-top:16px;border-top:2px solid var(--olive);display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:1px}.total b{color:var(--sand)}
+.discount-line{color:var(--sand);font-size:13px;margin-top:8px;padding:8px;background:var(--olive);border-radius:6px;text-transform:uppercase;letter-spacing:1px;font-weight:800}
 .empty{text-align:center;color:var(--muted);padding:40px 0;font-style:italic}
-.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);
-  background:var(--olive);color:var(--sand);padding:12px 22px;border-radius:8px;
-  font-weight:700;z-index:200;border:1px solid var(--sand);
-  box-shadow:3px 3px 0 var(--sd);text-transform:uppercase;font-size:12px;
-  letter-spacing:1px;font-family:inherit}
-.profile-card{background:var(--card2);border-radius:10px;padding:16px;
-  box-shadow:3px 3px 0 var(--sd);margin-bottom:14px;border:1px solid var(--olive)}
-.avatar{width:60px;height:60px;border-radius:8px;background:var(--olive);
-  display:flex;align-items:center;justify-content:center;font-size:26px;
-  font-weight:900;color:var(--sand);margin-bottom:12px;
-  border:2px solid var(--sand);box-shadow:2px 2px 0 var(--sd)}
-.profile-name{font-size:17px;font-weight:900;margin-bottom:4px;color:var(--sand);
-  text-transform:uppercase;letter-spacing:1px}
-.profile-sub{color:var(--muted);font-size:12px;margin-bottom:2px;
-  font-family:"Courier New",monospace}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--olive);color:var(--sand);padding:12px 22px;border-radius:8px;font-weight:700;z-index:200;border:1px solid var(--sand);box-shadow:3px 3px 0 var(--sd);text-transform:uppercase;font-size:12px;letter-spacing:1px;font-family:inherit}
+.profile-card{background:var(--card2);border-radius:10px;padding:16px;box-shadow:3px 3px 0 var(--sd);margin-bottom:14px;border:1px solid var(--olive)}
+.avatar{width:60px;height:60px;border-radius:8px;background:var(--olive);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:var(--sand);margin-bottom:12px;border:2px solid var(--sand);box-shadow:2px 2px 0 var(--sd)}
+.profile-name{font-size:17px;font-weight:900;margin-bottom:4px;color:var(--sand);text-transform:uppercase;letter-spacing:1px}
+.profile-sub{color:var(--muted);font-size:12px;margin-bottom:2px;font-family:"Courier New",monospace}
 .stickers{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.sticker{width:38px;height:38px;border-radius:6px;background:var(--card);
-  display:flex;align-items:center;justify-content:center;font-size:18px;
-  border:1px solid var(--olive);color:var(--muted)}
-.sticker.filled{background:var(--olive);color:var(--sand);border-color:var(--sand);
-  box-shadow:0 0 8px rgba(139,149,86,.5)}
-.section-title{font-size:14px;font-weight:900;margin:20px 0 10px;
-  color:var(--sand);text-transform:uppercase;letter-spacing:2px;
-  border-left:3px solid var(--olive);padding-left:10px}
-.order{background:var(--card2);border-radius:8px;padding:14px;margin-bottom:10px;
-  border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}
-.order b{color:var(--sand)}
-.order .meta{color:var(--muted);font-size:11px;font-family:monospace}
-.order .status{display:inline-block;padding:2px 8px;border-radius:4px;
-  font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;
-  background:var(--olive);color:var(--sand)}
+.sticker{width:38px;height:38px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid var(--olive);color:var(--muted)}
+.sticker.filled{background:var(--olive);color:var(--sand);border-color:var(--sand);box-shadow:0 0 8px rgba(139,149,86,.5)}
+.section-title{font-size:14px;font-weight:900;margin:20px 0 10px;color:var(--sand);text-transform:uppercase;letter-spacing:2px;border-left:3px solid var(--olive);padding-left:10px}
+.order{background:var(--card2);border-radius:8px;padding:14px;margin-bottom:10px;border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}
+.order b{color:var(--sand)}.order .meta{color:var(--muted);font-size:11px;font-family:monospace}
+.order .status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;background:var(--olive);color:var(--sand)}
 </style>
 </head>
 <body>
@@ -536,35 +407,26 @@ html,body{margin:0;background:var(--bg);color:var(--text);
   <div class="logo">Cloud99</div>
   <div class="topbar-right">
     <div class="profile-btn" onclick="openProfile()">👤</div>
-    <div class="cart-btn" onclick="openCart()">
-      🛒 <span id="cc">0</span>
-      <div class="badge" id="cb" style="display:none">0</div>
-    </div>
+    <div class="cart-btn" onclick="openCart()">🛒 <span id="cc">0</span><div class="badge" id="cb" style="display:none">0</div></div>
   </div>
 </div>
-
 <div class="cats" id="cats"></div>
 <div class="grid" id="grid"><div class="empty">Загрузка...</div></div>
-
 <div class="modal hidden" id="cart" onclick="if(event.target===this)closeCart()">
   <div class="sheet">
-    <h2>🛒 Корзина</h2>
-    <div id="ci"></div>
+    <h2>🛒 Корзина</h2><div id="ci"></div>
     <div class="total">Итого: <b id="ct">0.00 BYN</b></div>
     <div id="discountInfo"></div>
     <button class="btn primary" style="width:100%;padding:15px" onclick="checkout()">Оформить заказ</button>
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:8px" onclick="closeCart()">Закрыть</button>
   </div>
 </div>
-
 <div class="modal hidden" id="profile" onclick="if(event.target===this)closeProfile()">
   <div class="sheet">
-    <h2>👤 Личный кабинет</h2>
-    <div id="profileContent">Загрузка...</div>
+    <h2>👤 Личный кабинет</h2><div id="profileContent">Загрузка...</div>
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px" onclick="closeProfile()">Закрыть</button>
   </div>
 </div>
-
 <script>
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
@@ -589,12 +451,11 @@ async function loadProducts(){
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
   const g = document.getElementById('grid');
-  if (!PRODUCTS.length){
-    g.innerHTML = '<div class="empty" style="grid-column:1/-1">Товаров нет</div>'; return;
-  }
+  if (!PRODUCTS.length){ g.innerHTML = '<div class="empty" style="grid-column:1/-1">Товаров нет</div>'; return; }
+  
   g.innerHTML = PRODUCTS.map(p=>`
     <div class="card">
-      ${p.image ? `<img src="/images/${p.image}" onerror="this.src='https://api.telegram.org/file/bot${BOT_TOKEN}/${p.image}'; this.onerror=null;" alt="">` : `<div class="ph">📦</div>`}
+      ${p.image ? `<img src="/tgimg/${p.image}" onerror="this.src='https://api.telegram.org/file/bot8725408100:AAFm-hMhx7EXVrzdelHSe4h5EIH7bXC86sc/${p.image}'; this.onerror=null;" alt="">` : `<div class="ph">📦</div>`}
       <div class="t">${escape(p.title)}</div>
       <div class="p">${money(p.price)}</div>
       <button class="btn primary add" onclick="addToCart(${p.id})">В корзину</button>
@@ -753,8 +614,7 @@ async def handle_products(req):
     cat = req.query.get("cat")
     products = await get_products(int(cat) if cat else None)
     for p in products:
-        if p.get("created_at"):
-            p["created_at"] = str(p["created_at"])
+        if p.get("created_at"): p["created_at"] = str(p["created_at"])
     return web.json_response(products)
 
 async def handle_order(req):
@@ -796,18 +656,18 @@ async def handle_profile(req):
     uid = int(req.match_info["uid"])
     orders = await get_orders(uid)
     for o in orders:
-        if o.get("created_at"):
-            o["created_at"] = str(o["created_at"])
+        if o.get("created_at"): o["created_at"] = str(o["created_at"])
     return web.json_response({"orders": orders, "stats": await get_user_stats(uid)})
 
-async def handle_image(req):
-    name = req.match_info["name"]
-    # Редирект на Telegram, если это file_id
-    if not name.endswith('.jpg') and not name.endswith('.png'):
-        return web.HTTPFound(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{name}")
-    path = IMAGES_DIR / name
-    if not path.exists(): return web.Response(status=404)
-    return web.FileResponse(path)
+async def handle_tgimg(req):
+    """Перенаправляет file_id на прямой API Telegram для скачивания фото"""
+    file_id = req.match_info["file_id"]
+    try:
+        file_info = await bot.get_file(file_id)
+        return web.HTTPFound(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}")
+    except Exception as e:
+        log.warning(f"img redirect error: {e}")
+        return web.Response(status=404)
 
 def build_web():
     app = web.Application()
@@ -817,7 +677,7 @@ def build_web():
     app.router.add_get("/api/products", handle_products)
     app.router.add_post("/api/order", handle_order)
     app.router.add_get("/api/profile/{uid}", handle_profile)
-    app.router.add_get("/images/{name}", handle_image)
+    app.router.add_get("/tgimg/{file_id}", handle_tgimg)
     return app
 
 async def keep_alive():
@@ -833,7 +693,7 @@ async def keep_alive():
 
 async def main():
     await init_db()
-    if not PUBLIC_URL: log.warning("PUBLIC_URL не задан — WebApp-кнопка не откроется.")
+    if not PUBLIC_URL: log.warning("PUBLIC_URL не задан.")
     runner = web.AppRunner(build_web()); await runner.setup()
     site = web.TCPSite(runner, HOST, PORT); await site.start()
     log.info(f"WebApp: http://{HOST}:{PORT}")

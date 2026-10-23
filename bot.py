@@ -23,6 +23,7 @@ HOST       = "0.0.0.0"
 
 DISCOUNT_PERCENT = 15
 DISCOUNT_MIN_SUM = 35.0
+IMAGES_DIR = Path("images"); IMAGES_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("cloud99")
@@ -31,7 +32,7 @@ if not BOT_TOKEN: raise SystemExit("BOT_TOKEN не задан!")
 if not DATABASE_URL: raise SystemExit("DATABASE_URL не задан!")
 
 # ============================================================
-#                       БАЗА ДАННЫХ (Postgres)
+#                       БАЗА ДАННЫХ
 # ============================================================
 pool = None
 
@@ -39,10 +40,7 @@ async def get_pool():
     global pool
     if pool is None:
         dsn = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
-        pool = AsyncConnectionPool(
-            dsn, min_size=1, max_size=5, open=False,
-            check=AsyncConnectionPool.check_connection
-        )
+        pool = AsyncConnectionPool(dsn, min_size=1, max_size=5, open=False, check=AsyncConnectionPool.check_connection)
         await pool.open()
     return pool
 
@@ -50,17 +48,9 @@ async def init_db():
     p = await get_pool()
     async with p.connection() as conn:
         await conn.execute("""
-        CREATE TABLE IF NOT EXISTS categories(
-            id SERIAL PRIMARY KEY, title TEXT UNIQUE NOT NULL, emoji TEXT DEFAULT '', sort INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS products(
-            id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL,
-            description TEXT DEFAULT '', price REAL NOT NULL, image TEXT DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS orders(
-            id SERIAL PRIMARY KEY, user_id BIGINT, username TEXT, items TEXT, total REAL,
-            status TEXT DEFAULT 'new', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        CREATE TABLE IF NOT EXISTS categories(id SERIAL PRIMARY KEY, title TEXT UNIQUE NOT NULL, emoji TEXT DEFAULT '', sort INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS products(id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL, description TEXT DEFAULT '', price REAL NOT NULL, image TEXT DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS orders(id SERIAL PRIMARY KEY, user_id BIGINT, username TEXT, items TEXT, total REAL, status TEXT DEFAULT 'new', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS admins(user_id BIGINT PRIMARY KEY, username TEXT);
         CREATE TABLE IF NOT EXISTS stickers(user_id BIGINT PRIMARY KEY, count INTEGER DEFAULT 0, discount_active INTEGER DEFAULT 0);
         """)
@@ -69,6 +59,7 @@ async def init_db():
         await conn.commit()
     log.info("DB initialized")
 
+# --- Функции базы (как были) ---
 async def get_categories():
     p = await get_pool()
     async with p.connection() as conn:
@@ -256,8 +247,7 @@ async def add_price(m: Message, state: FSMContext):
 
 @dp.message(AddP.photo, F.photo | F.text)
 async def add_photo(m: Message, state: FSMContext):
-    image = ""
-    if m.photo: image = m.photo[-1].file_id # Сохраняем ID из Telegram
+    image = m.photo[-1].file_id if m.photo else ""
     d = await state.get_data(); await add_product(d["cat"], d["title"], d["desc"], d["price"], image); await m.answer(f"✅ «{d['title']}» добавлен."); await state.clear()
 
 @dp.message(F.text == "✏️ Редактировать")
@@ -284,8 +274,7 @@ async def edit_prompt(c: CallbackQuery, state: FSMContext):
 @dp.message(EditP.val, F.photo | F.text)
 async def edit_save(m: Message, state: FSMContext):
     d = await state.get_data(); field, pid = d["field"], d["pid"]
-    if field == "image":
-        val = m.photo[-1].file_id if m.photo else ""
+    if field == "image": val = m.photo[-1].file_id if m.photo else ""
     elif field == "price": val = float(m.text.replace(",", "."))
     else: val = m.text.strip()
     await update_product(pid, field, val); await m.answer("✅ Обновлено."); await state.clear()
@@ -363,14 +352,15 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
 .logo{font-weight:900;letter-spacing:3px;font-size:18px;color:var(--sand);text-transform:uppercase;text-shadow:1px 1px 0 var(--sd)}
 .logo:before{content:"◤ ";color:var(--accent2)}
 .topbar-right{display:flex;gap:8px;align-items:center}
-.profile-btn,.cart-btn{background:var(--card);padding:10px 14px;border-radius:8px;box-shadow:3px 3px 0 var(--sd);cursor:pointer;border:1px solid var(--olive);color:var(--text);font-family:inherit;font-weight:700}
+.profile-btn,.cart-btn{background:var(--card);padding:10px 14px;border-radius:8px;box-shadow:3px 3px 0 var(--sd);cursor:pointer;border:1px solid var(--olive);color:var(--text);font-family:inherit;font-weight:700;transition:.1s}
+.profile-btn:active,.cart-btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .cart-btn span{color:var(--accent2)}.badge{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:900}.cart-btn{position:relative}
 .cats{display:flex;gap:8px;overflow-x:auto;padding:14px 16px;scrollbar-width:none}.cats::-webkit-scrollbar{display:none}
-.cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);color:var(--text);text-transform:uppercase;font-family:inherit}
+.cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);color:var(--text);text-transform:uppercase;font-family:inherit;transition:.1s}
 .cat.active{background:var(--olive);color:var(--sand);border-color:var(--sand)}.cat:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px}
-.card{background:var(--card);border-radius:var(--r);padding:12px;box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px;position:relative}
-.card:before{content:"";position:absolute;top:6px;right:8px;width:6px;height:6px;background:var(--accent);border-radius:50%}
+.card{background:var(--card);border-radius:var(--r);padding:12px;box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px;position:relative;opacity:0;transform:translateY(10px);animation:fadeIn .3s forwards}
+@keyframes fadeIn{to{opacity:1;transform:translateY(0)}}
 .card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:var(--card2);border:1px solid var(--olive)}
 .ph{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:40px;border:1px solid var(--olive)}
 .card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}.card .p{font-size:15px;font-weight:900;color:var(--sand)}
@@ -387,19 +377,22 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
 .qty{display:flex;gap:6px;align-items:center}.qty button{width:30px;height:30px;border-radius:6px;border:1px solid var(--olive);background:var(--card2);color:var(--sand);font-size:16px;font-weight:900;cursor:pointer;font-family:inherit}.qty span{min-width:20px;text-align:center;font-weight:800}
 .total{font-size:16px;margin:18px 0;padding-top:16px;border-top:2px solid var(--olive);display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:1px}.total b{color:var(--sand)}
 .discount-line{color:var(--sand);font-size:13px;margin-top:8px;padding:8px;background:var(--olive);border-radius:6px;text-transform:uppercase;letter-spacing:1px;font-weight:800}
-.empty{text-align:center;color:var(--muted);padding:40px 0;font-style:italic}
-.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--olive);color:var(--sand);padding:12px 22px;border-radius:8px;font-weight:700;z-index:200;border:1px solid var(--sand);box-shadow:3px 3px 0 var(--sd);text-transform:uppercase;font-size:12px;letter-spacing:1px;font-family:inherit}
+.empty{text-align:center;color:var(--muted);padding:40px 0;font-style:italic;animation:fadeIn .5s}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--olive);color:var(--sand);padding:12px 22px;border-radius:8px;font-weight:700;z-index:200;border:1px solid var(--sand);box-shadow:3px 3px 0 var(--sd);text-transform:uppercase;font-size:12px;letter-spacing:1px;font-family:inherit;animation:fadeIn .2s}
 .profile-card{background:var(--card2);border-radius:10px;padding:16px;box-shadow:3px 3px 0 var(--sd);margin-bottom:14px;border:1px solid var(--olive)}
-.avatar{width:60px;height:60px;border-radius:8px;background:var(--olive);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:var(--sand);margin-bottom:12px;border:2px solid var(--sand);box-shadow:2px 2px 0 var(--sd)}
+.avatar{width:60px;height:60px;border-radius:50%;background:var(--olive);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:var(--sand);margin-bottom:12px;border:2px solid var(--sand);box-shadow:2px 2px 0 var(--sd);overflow:hidden}
+.avatar img{width:100%;height:100%;object-fit:cover}
 .profile-name{font-size:17px;font-weight:900;margin-bottom:4px;color:var(--sand);text-transform:uppercase;letter-spacing:1px}
 .profile-sub{color:var(--muted);font-size:12px;margin-bottom:2px;font-family:"Courier New",monospace}
 .stickers{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.sticker{width:38px;height:38px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid var(--olive);color:var(--muted)}
-.sticker.filled{background:var(--olive);color:var(--sand);border-color:var(--sand);box-shadow:0 0 8px rgba(139,149,86,.5)}
+.sticker{width:38px;height:38px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid var(--olive);color:var(--muted);transition:.2s}
+.sticker.filled{background:var(--olive);color:var(--sand);border-color:var(--sand);box-shadow:0 0 8px rgba(139,149,86,.5);transform:scale(1.05)}
 .section-title{font-size:14px;font-weight:900;margin:20px 0 10px;color:var(--sand);text-transform:uppercase;letter-spacing:2px;border-left:3px solid var(--olive);padding-left:10px}
-.order{background:var(--card2);border-radius:8px;padding:14px;margin-bottom:10px;border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}
+.order{background:var(--card2);border-radius:8px;padding:14px;margin-bottom:10px;border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd);animation:fadeIn .3s}
 .order b{color:var(--sand)}.order .meta{color:var(--muted);font-size:11px;font-family:monospace}
 .order .status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;background:var(--olive);color:var(--sand)}
+.copy-btn{margin-top:8px;font-size:10px;padding:4px 8px;background:transparent;border:1px solid var(--muted);color:var(--muted);border-radius:4px;cursor:pointer;width:max-content}
+.copy-btn:active{background:var(--card)}
 </style>
 </head>
 <body>
@@ -414,7 +407,11 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
 <div class="grid" id="grid"><div class="empty">Загрузка...</div></div>
 <div class="modal hidden" id="cart" onclick="if(event.target===this)closeCart()">
   <div class="sheet">
-    <h2>🛒 Корзина</h2><div id="ci"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="margin:0;border:none;padding:0">🛒 Корзина</h2>
+      <button class="btn ghost" style="padding:6px 10px;font-size:10px" onclick="clearCart()">Очистить</button>
+    </div>
+    <div id="ci"></div>
     <div class="total">Итого: <b id="ct">0.00 BYN</b></div>
     <div id="discountInfo"></div>
     <button class="btn primary" style="width:100%;padding:15px" onclick="checkout()">Оформить заказ</button>
@@ -451,11 +448,12 @@ async function loadProducts(){
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
   const g = document.getElementById('grid');
-  if (!PRODUCTS.length){ g.innerHTML = '<div class="empty" style="grid-column:1/-1">Товаров нет</div>'; return; }
-  
-  g.innerHTML = PRODUCTS.map(p=>`
-    <div class="card">
-      ${p.image ? `<img src="/tgimg/${p.image}" onerror="this.src='https://api.telegram.org/file/bot8725408100:AAFm-hMhx7EXVrzdelHSe4h5EIH7bXC86sc/${p.image}'; this.onerror=null;" alt="">` : `<div class="ph">📦</div>`}
+  if (!PRODUCTS.length){
+    g.innerHTML = '<div class="empty" style="grid-column:1/-1">Товаров нет</div>'; return;
+  }
+  g.innerHTML = PRODUCTS.map((p,i)=>`
+    <div class="card" style="animation-delay:${i*0.05}s">
+      ${p.image ? `<img src="/tgimg/${p.image}" alt="">` : `<div class="ph">📦</div>`}
       <div class="t">${escape(p.title)}</div>
       <div class="p">${money(p.price)}</div>
       <button class="btn primary add" onclick="addToCart(${p.id})">В корзину</button>
@@ -521,6 +519,7 @@ async function openCart(){
   document.getElementById('cart').classList.remove('hidden');
 }
 function closeCart(){ document.getElementById('cart').classList.add('hidden'); }
+function clearCart(){ CART = {}; saveCart(); updateBadge(); openCart(); toast('Корзина очищена'); }
 function chQty(id,d){
   if (!CART[id]) return;
   CART[id].qty += d;
@@ -561,7 +560,15 @@ async function openProfile(){
   const res = await api('/api/profile/'+u.id);
   const orders = res.orders || [];
   const st = res.stats || {orders:0, stickers:0, discount_active:false};
-  const initial = (u.first_name || u.username || 'C')[0].toUpperCase();
+  
+  // Аватарка из ТГ, если есть
+  let avatarHtml = '';
+  if (u.photo_url) {
+      avatarHtml = `<img src="${u.photo_url}" alt="">`;
+  } else {
+      avatarHtml = (u.first_name || u.username || 'C')[0].toUpperCase();
+  }
+
   let stickersHtml = '';
   for (let i = 0; i < 10; i++){ stickersHtml += `<div class="sticker${i < st.stickers ? ' filled' : ''}">${i < st.stickers ? '★' : ''}</div>`; }
   let ordersHtml = '';
@@ -580,11 +587,12 @@ async function openProfile(){
   }
   box.innerHTML = `
     <div class="profile-card">
-      <div class="avatar">${initial}</div>
+      <div class="avatar">${avatarHtml}</div>
       <div class="profile-name">${escape(u.first_name || u.username || 'Гость')}</div>
       <div class="profile-sub">@${escape(u.username || '—')}</div>
       <div class="profile-sub">ID: ${u.id}</div>
-      <div class="profile-sub">Подтверждённых: ${st.orders}</div>
+      <button class="copy-btn" onclick="copyId(${u.id})">Скопировать ID</button>
+      <div class="profile-sub" style="margin-top:8px">Подтверждённых: ${st.orders}</div>
     </div>
     <div class="profile-card">
       <div style="font-weight:900;color:var(--sand);text-transform:uppercase;letter-spacing:1px;font-size:13px">10 отметок = скидка 15%</div>
@@ -596,7 +604,9 @@ async function openProfile(){
   `;
 }
 function closeProfile(){ document.getElementById('profile').classList.add('hidden'); }
-
+function copyId(id){
+    navigator.clipboard.writeText(id.toString()).then(() => toast('ID скопирован'));
+}
 loadCats(); loadProducts(); updateBadge();
 </script>
 </body>
@@ -660,7 +670,6 @@ async def handle_profile(req):
     return web.json_response({"orders": orders, "stats": await get_user_stats(uid)})
 
 async def handle_tgimg(req):
-    """Перенаправляет file_id на прямой API Telegram для скачивания фото"""
     file_id = req.match_info["file_id"]
     try:
         file_info = await bot.get_file(file_id)

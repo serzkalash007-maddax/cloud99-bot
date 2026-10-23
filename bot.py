@@ -482,10 +482,35 @@ html,body{
 .scroll-top{position:fixed;bottom:24px;right:16px;width:44px;height:44px;border-radius:50%;background:var(--glass-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 15px rgba(0,0,0,0.3);cursor:pointer;opacity:0;pointer-events:none;transition:.3s;z-index:50;border:1px solid var(--accent);backdrop-filter:blur(10px)}
 .scroll-top.visible{opacity:1;pointer-events:auto}
 
-/* Стили для Колеса */
-.wheel-container { display: flex; flex-direction: column; align-items: center; margin-top: 10px; }
-.wheel-btn { font-size: 20px; padding: 16px; margin-top: 10px; }
-.wheel-result { font-size: 18px; font-weight: 900; color: var(--accent); margin-top: 12px; text-align: center; text-shadow: 0 0 10px var(--accent-glow); }
+/* --- КОЛЕСО ФОРТУНЫ --- */
+.wheel-overlay {
+    position: fixed; inset: 0; background: rgba(5, 10, 16, 0.95); 
+    display: none; align-items: center; justify-content: center; z-index: 1000;
+    backdrop-filter: blur(10px);
+}
+.wheel-modal {
+    background: #0f1d2b; border-radius: 20px; padding: 30px 20px;
+    border: 2px solid var(--accent); box-shadow: 0 0 50px var(--accent-glow);
+    display: flex; flex-direction: column; align-items: center;
+    position: relative; width: 90%; max-width: 350px;
+}
+.wheel-pointer {
+    width: 0; height: 0; border-left: 15px solid transparent; 
+    border-right: 15px solid transparent; border-top: 25px solid var(--accent);
+    filter: drop-shadow(0 0 10px var(--accent-glow)); margin-bottom: -10px; z-index: 2;
+}
+.wheel-svg-container { position: relative; width: 280px; height: 280px; margin: 10px 0; }
+.wheel-svg { width: 100%; height: 100%; transition: transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99); transform-origin: center; }
+.wheel-btn-close {
+    position: absolute; top: 10px; right: 15px; font-size: 24px;
+    color: var(--text-sub); cursor: pointer; transition: .2s;
+}
+.wheel-btn-close:active { color: var(--accent); transform: scale(1.2); }
+.wheel-result-text {
+    font-size: 20px; font-weight: 900; color: var(--accent);
+    text-shadow: 0 0 10px var(--accent-glow); margin-top: 15px; text-align: center;
+    min-height: 28px;
+}
 </style>
 </head>
 <body>
@@ -528,14 +553,11 @@ html,body{
     <h2>👤 Личный кабинет</h2>
     <div id="profileContent">Загрузка...</div>
     
-    <!-- Колесо Фортуны в профиле -->
-    <div class="profile-card" id="wheelCard" style="margin-top:16px;">
-        <div style="font-weight:900;color:var(--accent);font-size:16px;margin-bottom:8px;">🎰 Колесо Фортуны</div>
-        <div style="font-size:12px;color:var(--text-sub);margin-bottom:8px;">Испытай удачу раз в неделю или за заказ от 40 BYN.</div>
-        <div class="wheel-container">
-            <button class="btn primary wheel-btn" id="wheelBtn" onclick="spinWheel()">КРУТИТЬ</button>
-            <div class="wheel-result" id="wheelResult"></div>
-        </div>
+    <div class="profile-card" style="margin-top:16px; text-align:center;">
+        <div style="font-weight:900;color:var(--accent);font-size:18px;margin-bottom:8px;">🎰 Колесо Фортуны</div>
+        <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px;">Раз в неделю или за заказ от 40 BYN</div>
+        <button class="btn primary" id="wheelBtn" onclick="openWheel()" style="padding:15px;font-size:16px;">КРУТИТЬ КОЛЕСО</button>
+        <div id="wheelStatus" style="font-size:12px;color:var(--accent);margin-top:10px;font-weight:700;"></div>
     </div>
 
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px" onclick="closeProfile()">Закрыть</button>
@@ -544,6 +566,36 @@ html,body{
 </div>
 <div id="productModal" style="display:none" class="product-modal" onclick="if(event.target===this)closeProductModal()"></div>
 <div class="scroll-top" id="scrollTop" onclick="scrollToTop()">▲</div>
+
+<!-- МОДАЛКА КОЛЕСА -->
+<div class="wheel-overlay" id="wheelOverlay">
+    <div class="wheel-modal">
+        <div class="wheel-btn-close" onclick="closeWheel()">×</div>
+        <h2 style="margin:0 0 10px;color:var(--accent);text-transform:uppercase;letter-spacing:2px;">Колесо Фортуны</h2>
+        <div class="wheel-pointer"></div>
+        <div class="wheel-svg-container">
+            <svg class="wheel-svg" id="wheelSvg" viewBox="0 0 100 100">
+                <!-- Сектора -->
+                <circle cx="50" cy="50" r="48" fill="#0a1622" stroke="var(--accent)" stroke-width="1"/>
+                <path d="M50,50 L50,2 A48,48 0 0,1 98,50 Z" fill="#ff007f" opacity="0.8"/> <!-- 15% -->
+                <path d="M50,50 L98,50 A48,48 0 0,1 50,98 Z" fill="#00f0ff" opacity="0.8"/> <!-- 10% -->
+                <path d="M50,50 L50,98 A48,48 0 0,1 2,50 Z" fill="#ff007f" opacity="0.8"/> <!-- 5% -->
+                <path d="M50,50 L2,50 A48,48 0 0,1 50,2 Z" fill="#333" opacity="0.8"/> <!-- Пусто -->
+                
+                <!-- Текст -->
+                <text x="75" y="30" fill="#fff" font-size="6" font-weight="bold" transform="rotate(45 75 30)">15%</text>
+                <text x="75" y="70" fill="#000" font-size="6" font-weight="bold" transform="rotate(-45 75 70)">10%</text>
+                <text x="25" y="70" fill="#fff" font-size="6" font-weight="bold" transform="rotate(45 25 70)">5%</text>
+                <text x="25" y="30" fill="#fff" font-size="6" font-weight="bold" transform="rotate(-45 25 30)">Пусто</text>
+                
+                <circle cx="50" cy="50" r="8" fill="#0f1d2b" stroke="var(--accent)" stroke-width="2"/>
+            </svg>
+        </div>
+        <div class="wheel-result-text" id="wheelResultText">Нажми, чтобы крутить!</div>
+        <button class="btn primary" id="spinBtn" onclick="doSpin()" style="margin-top:15px;">КРУТИТЬ</button>
+    </div>
+</div>
+
 <script>
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
@@ -574,47 +626,80 @@ function getWheelStatus() {
     return { canSpin, daysLeft, discount: ws.discount, extra: ws.extra };
 }
 
-function spinWheel() {
-    const btn = document.getElementById('wheelBtn');
-    const res = document.getElementById('wheelResult');
+function openWheel() {
     const status = getWheelStatus();
-    
     if (!status.canSpin) {
-        res.innerHTML = `⏳ Доступно через ${status.daysLeft} дн.`;
+        toast(`Доступно через ${status.daysLeft} дн.`);
+        return;
+    }
+    document.getElementById('wheelOverlay').style.display = 'flex';
+    document.getElementById('wheelResultText').textContent = 'Нажми, чтобы крутить!';
+    
+    const svg = document.getElementById('wheelSvg');
+    svg.style.transition = 'none';
+    svg.style.transform = 'rotate(0deg)';
+    
+    setTimeout(() => { svg.style.transition = 'transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99)'; }, 50);
+}
+
+function closeWheel() {
+    document.getElementById('wheelOverlay').style.display = 'none';
+}
+
+function doSpin() {
+    const btn = document.getElementById('spinBtn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    
+    const status = getWheelStatus();
+    if (!status.canSpin) {
+        closeWheel();
         return;
     }
     
-    btn.disabled = true;
-    btn.textContent = 'КРУТИМ...';
+    let ws = JSON.parse(localStorage.getItem('wheel_status') || '{"last_spin":0,"discount":0,"extra":0}');
+    
+    // Шансы: 5% (4%), 10% (3%), 15% (3%), Пусто (90%)
+    const chance = Math.random() * 100;
+    let discount = 0;
+    let winAngle = 0;
+    
+    if (chance < 4) { 
+        discount = 5; winAngle = 180; // Сектор 5% (слева)
+    } else if (chance < 7) { 
+        discount = 10; winAngle = 270; // Сектор 10% (снизу)
+    } else if (chance < 10) { 
+        discount = 15; winAngle = 90; // Сектор 15% (справа)
+    } else { 
+        discount = 0; winAngle = 0; // Пусто (сверху)
+    }
+    
+    // Крутим: + 5 полных оборотов (1800 градусов)
+    const spinDeg = 1800 + (360 - winAngle);
+    
+    const svg = document.getElementById('wheelSvg');
+    svg.style.transform = `rotate(${spinDeg}deg)`;
     
     setTimeout(() => {
-        let ws = JSON.parse(localStorage.getItem('wheel_status') || '{"last_spin":0,"discount":0,"extra":0}');
-        const chance = Math.random() * 100; // 0..100
-        let discount = 0;
-        
-        if (chance < 4) discount = 5;
-        else if (chance < 7) discount = 10;
-        else if (chance < 10) discount = 15;
+        if (discount > 0) {
+            document.getElementById('wheelResultText').textContent = `🎉 ВЫПАЛО ${discount}%!`;
+            ws.discount = discount;
+            toast(`Скидка ${discount}% активирована!`);
+        } else {
+            document.getElementById('wheelResultText').textContent = `😢 Пусто. +1 стикер ⭐`;
+            toast(`Пусто. +1 стикер!`);
+            // Здесь можно отправить запрос боту на +1 стикер, если нужно
+        }
         
         if (ws.extra > 0) ws.extra--;
         else ws.last_spin = Date.now();
         
-        ws.discount = discount;
         localStorage.setItem('wheel_status', JSON.stringify(ws));
-        
         btn.disabled = false;
-        btn.textContent = 'КРУТИТЬ';
         
-        if (discount > 0) {
-            res.innerHTML = `🎉 ВЫПАЛО ${discount}%! Скидка в корзине.`;
-            WHEEL_DISCOUNT = discount;
-            toast(`Скидка ${discount}% активирована!`);
-        } else {
-            res.innerHTML = `😢 Пусто. Но мы дали вам 1 стикер ⭐`;
-            toast(`Пусто. +1 стикер!`);
-            // Здесь можно отправить запрос боту на +1 стикер, если нужно
-        }
-    }, 1500);
+        // Обновляем состояние в профиле
+        updateWheelStatusUI();
+    }, 4200);
 }
 // -------------------
 
@@ -632,7 +717,7 @@ async function loadProducts(){
     <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
     <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
   `;
-  await new Promise(r => setTimeout(r, 800)); // Искусственная задержка для скелетонов
+  await new Promise(r => setTimeout(r, 800));
   
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
@@ -715,6 +800,26 @@ function updateBadge(){
   b.style.display = n ? 'flex':'none'; b.textContent = n;
 }
 
+function updateWheelStatusUI() {
+    const ws = getWheelStatus();
+    const wheelBtn = document.getElementById('wheelBtn');
+    const wheelStatus = document.getElementById('wheelStatus');
+    
+    if (ws.extra > 0) {
+        wheelBtn.disabled = false;
+        wheelBtn.classList.remove('disabled');
+        wheelStatus.innerHTML = `🎁 У вас есть ${ws.extra} доп. попытка!`;
+    } else if (ws.canSpin) {
+        wheelBtn.disabled = false;
+        wheelBtn.classList.remove('disabled');
+        wheelStatus.innerHTML = `🎰 Доступно 1 вращение!`;
+    } else {
+        wheelBtn.disabled = true;
+        wheelBtn.classList.add('disabled');
+        wheelStatus.innerHTML = `⏳ Доступно через ${ws.daysLeft} дн.`;
+    }
+}
+
 async function checkDiscount(){
   const u = tg?.initDataUnsafe?.user; if (!u) return;
   const res = await api('/api/profile/'+u.id);
@@ -722,21 +827,7 @@ async function checkDiscount(){
   if (USER_DISCOUNT) {
       document.querySelector('.profile-btn').classList.add('pulse');
   }
-  
-  // Колесо
-  const wheelBtn = document.getElementById('wheelBtn');
-  const wheelRes = document.getElementById('wheelResult');
-  const ws = getWheelStatus();
-  
-  if (!ws.canSpin) {
-      wheelBtn.disabled = true;
-      wheelBtn.classList.add('disabled');
-      wheelRes.innerHTML = `⏳ Доступно через ${ws.daysLeft} дн.`;
-  } else {
-      wheelBtn.disabled = false;
-      wheelBtn.classList.remove('disabled');
-      wheelRes.innerHTML = ws.extra > 0 ? `🎁 У вас есть ${ws.extra} доп. попытка!` : ``;
-  }
+  updateWheelStatusUI();
 }
 
 function calcTotals(){
@@ -806,14 +897,12 @@ async function checkout(){
   const u = tg?.initDataUnsafe?.user || {id:0, username:'guest'};
   const {subtotal, discount, total, eligible} = calcTotals();
   
-  // Очищаем скидку колеса после заказа
   const ws = getWheelStatus();
   if (ws.discount > 0) {
      ws.discount = 0;
      localStorage.setItem('wheel_status', JSON.stringify(ws));
   }
   
-  // Если заказ от 40, даем доп. попытку
   if (total >= 40) {
      ws.extra = (ws.extra || 0) + 1;
      localStorage.setItem('wheel_status', JSON.stringify(ws));
@@ -887,7 +976,6 @@ async function openProfile(){
     ${ordersHtml}
   `;
   
-  // Обновляем колесо
   checkDiscount();
 }
 function closeProfile(){ document.getElementById('profile').classList.add('hidden'); }

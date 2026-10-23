@@ -371,52 +371,48 @@ HTML = r"""<!DOCTYPE html>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
-  --bg: #050a10;
+  --bg-color: #0a1622;
   --text-main: #ffffff;
   --text-sub: #8ab4c4;
   --accent: #00f0ff;
-  --accent-glow: rgba(0, 240, 255, 0.4);
+  --accent-glow: rgba(0, 240, 255, 0.3);
   --accent-grad: linear-gradient(135deg, #00f0ff, #0077ff);
-  --glass-bg: rgba(20, 35, 45, 0.4);
-  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.15);
   --font: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;font-family:var(--font)}
-html,body{margin:0;background:var(--bg);color:var(--text-main);padding-bottom:90px;min-height:100vh;overflow-x:hidden}
-
-/* Живой фон */
-body::before, body::after {
-  content: ""; position: fixed; border-radius: 50%; filter: blur(80px); z-index: -1; opacity: 0.6;
+html,body{
+  margin:0;
+  /* ГАРАНТИРОВАННЫЙ ЦВЕТНОЙ ФОН */
+  background-color: var(--bg-color);
+  background-image: radial-gradient(circle at 10% 20%, rgba(0, 240, 255, 0.15) 0%, transparent 40%),
+                    radial-gradient(circle at 90% 80%, rgba(0, 119, 255, 0.15) 0%, transparent 40%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  color:var(--text-main);
+  padding-bottom:90px;
+  min-height:100vh;
+  overflow-x:hidden;
 }
-body::before {
-  width: 300px; height: 300px; background: #00f0ff; top: -50px; left: -50px;
-  animation: float1 10s infinite alternate;
-}
-body::after {
-  width: 400px; height: 400px; background: #0077ff; bottom: -100px; right: -100px;
-  animation: float2 12s infinite alternate;
-}
-@keyframes float1 { 0% { transform: translate(0, 0); } 100% { transform: translate(50px, 100px); } }
-@keyframes float2 { 0% { transform: translate(0, 0); } 100% { transform: translate(-100px, -50px); } }
-
-.topbar{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;position:sticky;top:0;background:rgba(5, 10, 16, 0.7);backdrop-filter:blur(20px);z-index:20;border-bottom:1px solid var(--glass-border)}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;position:sticky;top:0;background:rgba(10, 22, 34, 0.8);backdrop-filter:blur(20px);z-index:20;border-bottom:1px solid var(--glass-border)}
 .logo{font-weight:900;letter-spacing:2px;font-size:22px;color:var(--accent);text-shadow:0 0 15px var(--accent-glow)}
 .topbar-right{display:flex;gap:12px;align-items:center}
-.profile-btn,.cart-btn{background:var(--glass-bg);padding:10px 16px;border-radius:12px;cursor:pointer;border:1px solid var(--glass-border);color:var(--text-main);font-weight:700;transition:.2s;backdrop-filter:blur(10px);display:flex;align-items:center;gap:6px;box-shadow:0 4px 15px rgba(0,0,0,0.3)}
-.profile-btn:active,.cart-btn:active{transform:scale(.95);background:rgba(255,255,255,0.1)}
+.profile-btn,.cart-btn{background:var(--glass-bg);padding:10px 16px;border-radius:12px;cursor:pointer;border:1px solid var(--glass-border);color:var(--text-main);font-weight:700;transition:.2s;backdrop-filter:blur(10px);display:flex;align-items:center;gap:6px}
+.profile-btn:active,.cart-btn:active{transform:scale(.95);background:rgba(255,255,255,0.15)}
 .cart-btn span{color:var(--accent)}
 .badge{position:absolute;top:-4px;right:-4px;background:var(--accent);color:#000;border-radius:50%;width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:900;box-shadow:0 0 10px var(--accent-glow)}
 .cart-btn{position:relative}
 .cats{display:flex;gap:10px;overflow-x:auto;padding:16px 20px;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
 .cat{flex:0 0 auto;padding:10px 20px;border-radius:30px;background:var(--glass-bg);font-weight:600;font-size:14px;cursor:pointer;border:1px solid var(--glass-border);color:var(--text-main);transition:.3s;backdrop-filter:blur(10px)}
-.cat.active{background:var(--accent-grad);color:#000;border-color:transparent;box-shadow:0 4px 20px var(--accent-glow);font-weight:800}
+.cat.active{background:var(--accent-grad);color:#000;border-color:transparent;box-shadow:0 4px 15px var(--accent-glow);font-weight:800}
 .cat:active{transform:scale(.95)}
 
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 20px}
-.card{background:var(--glass-bg);border-radius:20px;padding:14px;border:1px solid var(--glass-border);display:flex;flex-direction:column;gap:10px;position:relative;backdrop-filter:blur(15px);transition:.3s;opacity:0;transform:translateY(15px);animation:fadeIn .5s forwards;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+.card{background:var(--glass-bg);border-radius:20px;padding:14px;border:1px solid var(--glass-border);display:flex;flex-direction:column;gap:10px;position:relative;backdrop-filter:blur(10px);transition:.3s;opacity:0;transform:translateY(15px);animation:fadeIn .4s forwards;box-shadow:0 8px 32px rgba(0,0,0,.15)}
 @keyframes fadeIn{to{opacity:1;transform:translateY(0)}}
-.card:active{transform:scale(.97);border-color:var(--accent);box-shadow:0 0 25px var(--accent-glow)}
+.card:active{transform:scale(.97);border-color:var(--accent);box-shadow:0 0 20px var(--accent-glow)}
 .card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:14px;background:rgba(255,255,255,0.05)}
 .ph{width:100%;aspect-ratio:1/1;border-radius:14px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;color:var(--text-sub);font-size:40px}
 .card .t{font-size:15px;font-weight:700;line-height:1.2;min-height:36px}
@@ -424,15 +420,15 @@ body::after {
 .stock{font-size:12px;color:var(--text-sub);margin-top:-4px}
 
 .btn{border:none;border-radius:12px;padding:12px 16px;font-weight:700;font-size:13px;cursor:pointer;transition:.2s;width:100%}
-.btn.primary{background:var(--accent-grad);color:#000;box-shadow:0 4px 15px var(--accent-glow);transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;}
-.btn.primary:active{transform:scale(.92);box-shadow:0 2px 5px var(--accent-glow)}
+.btn.primary{background:var(--accent-grad);color:#000;box-shadow:0 4px 15px var(--accent-glow);transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);}
+.btn.primary:active{transform:scale(.92);}
 .btn.ghost{background:var(--glass-bg);color:var(--text-main);border:1px solid var(--glass-border);backdrop-filter:blur(10px)}
 .btn.disabled{background:rgba(255,255,255,0.05);color:var(--text-sub);cursor:not-allowed;box-shadow:none;border:1px solid transparent}
 .add{margin-top:auto}
 
-.modal{position:fixed;inset:0;background:rgba(5,10,16,.8);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(10px)}
+.modal{position:fixed;inset:0;background:rgba(10, 22, 34, 0.7);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(10px)}
 .modal.hidden{display:none}
-.sheet{background:#0a1520;border-radius:24px 24px 0 0;padding:24px;width:100%;max-height:85vh;overflow-y:auto;border-top:2px solid var(--accent);animation:up .3s;box-shadow:0 -10px 50px rgba(0,0,0,.5)}
+.sheet{background:#0f1d2b;border-radius:24px 24px 0 0;padding:24px;width:100%;max-height:85vh;overflow-y:auto;border-top:2px solid var(--accent);animation:up .3s;box-shadow:0 -10px 50px rgba(0,0,0,.5)}
 @keyframes up{from{transform:translateY(50px)}to{transform:translateY(0)}}
 .sheet h2{margin:0 0 20px;font-size:20px;color:var(--text-main);font-weight:800}
 .ci{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--glass-border);gap:12px}
@@ -449,8 +445,8 @@ body::after {
 .empty{text-align:center;color:var(--text-sub);padding:50px 0;font-size:16px}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--accent-grad);color:#000;padding:14px 24px;border-radius:14px;font-weight:800;z-index:200;box-shadow:0 8px 25px var(--accent-glow);animation:fadeIn .2s;font-size:14px}
 
-.profile-card{background:var(--glass-bg);border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid var(--glass-border);backdrop-filter:blur(15px);box-shadow:0 5px 20px rgba(0,0,0,0.2)}
-.avatar{width:70px;height:70px;border-radius:50%;background:var(--accent-grad);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;color:#000;margin-bottom:16px;overflow:hidden;border:2px solid var(--accent);box-shadow:0 0 20px var(--accent-glow)}
+.profile-card{background:var(--glass-bg);border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid var(--glass-border);backdrop-filter:blur(10px)}
+.avatar{width:70px;height:70px;border-radius:50%;background:var(--accent-grad);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;color:#000;margin-bottom:16px;overflow:hidden;border:2px solid var(--accent);box-shadow:0 0 15px var(--accent-glow)}
 .avatar img{width:100%;height:100%;object-fit:cover}
 .profile-name{font-size:20px;font-weight:900;margin-bottom:6px;color:var(--text-main)}
 .profile-sub{color:var(--text-sub);font-size:13px;margin-bottom:4px}
@@ -458,7 +454,7 @@ body::after {
 .sticker{width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--text-sub);transition:.3s;border:1px solid var(--glass-border)}
 .sticker.filled{background:var(--accent-grad);color:#000;box-shadow:0 0 15px var(--accent-glow);transform:scale(1.05);border:none}
 .section-title{font-size:18px;font-weight:900;margin:24px 0 14px;color:var(--text-main);display:flex;align-items:center;gap:8px}
-.order{background:var(--glass-bg);border-radius:14px;padding:16px;margin-bottom:12px;border:1px solid var(--glass-border);transition:.2s;backdrop-filter:blur(10px)}
+.order{background:var(--glass-bg);border-radius:14px;padding:16px;margin-bottom:12px;border:1px solid var(--glass-border);transition:.2s}
 .order b{color:var(--accent);font-size:15px}
 .order .meta{color:var(--text-sub);font-size:12px;margin:4px 0;display:block}
 .order .status{display:inline-block;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:800;margin-top:8px;background:rgba(255,255,255,0.05);text-transform:uppercase;color:var(--text-main)}
@@ -467,8 +463,8 @@ body::after {
 .copy-btn{margin-top:10px;font-size:12px;padding:6px 12px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--accent);border-radius:8px;cursor:pointer;font-weight:700;transition:.2s}
 .copy-btn:active{background:var(--accent);color:#000}
 
-.product-modal{position:fixed;inset:0;background:rgba(5,10,16,.95);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px;backdrop-filter:blur(10px)}
-.pm-box{background:#0a1520;border-radius:20px;padding:20px;max-width:400px;width:100%;border:1px solid var(--accent);box-shadow:0 0 50px var(--accent-glow);position:relative;max-height:90vh;overflow-y:auto;animation:fadeIn .3s}
+.product-modal{position:fixed;inset:0;background:rgba(10, 22, 34, 0.9);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px;backdrop-filter:blur(10px)}
+.pm-box{background:#0f1d2b;border-radius:20px;padding:20px;max-width:400px;width:100%;border:1px solid var(--accent);box-shadow:0 0 40px var(--accent-glow);position:relative;max-height:90vh;overflow-y:auto;animation:fadeIn .3s}
 .pm-close{position:absolute;top:12px;right:16px;font-size:24px;cursor:pointer;color:var(--text-sub);font-weight:bold;transition:.2s}
 .pm-close:active{color:var(--accent);transform:scale(1.1)}
 .pm-box img{width:100%;border-radius:12px;margin-bottom:16px;border:1px solid var(--glass-border)}

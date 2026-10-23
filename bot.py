@@ -58,7 +58,6 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS admins(user_id BIGINT PRIMARY KEY, username TEXT);
         CREATE TABLE IF NOT EXISTS stickers(user_id BIGINT PRIMARY KEY, count INTEGER DEFAULT 0, discount_active INTEGER DEFAULT 0);
         """)
-        # Автосоздание колонки stock, если её нет
         await conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 10;")
         
         for t, e, s in [("ЖИДКОСТИ","💧",1), ("РАСХОДНИКИ","🔧",2), ("ПОДЫ","💨",3)]:
@@ -190,9 +189,8 @@ class EditP(StatesGroup):
 
 def admin_menu():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="➕ Добавить товар"), KeyboardButton(text="✏️ Редактировать")],
-        [KeyboardButton(text="🗑 Удалить"), KeyboardButton(text="📦 Заказы")],
-        [KeyboardButton(text="⬅️ Выйти")]
+        [KeyboardButton(text="➕ Добавить товар")], [KeyboardButton(text="✏️ Редактировать")],
+        [KeyboardButton(text="🗑 Удалить")], [KeyboardButton(text="📦 Заказы")], [KeyboardButton(text="⬅️ Выйти")]
     ], resize_keyboard=True)
 
 @dp.message(CommandStart())
@@ -201,7 +199,7 @@ async def cmd_start(m: Message, state: FSMContext):
     if m.from_user.id == ADMIN_ID: await add_admin(m.from_user.id, m.from_user.username)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))],
-        [InlineKeyboardButton(text="💬 Написать нам", url="https://t.me/fluckwh_666")] # Замени на свой
+        [InlineKeyboardButton(text="💬 Написать нам", url="https://t.me/ВАШ_ЮЗЕРНЕЙМ")] 
     ])
     await m.answer(f"<b>CLOUD99</b>\n\nПривет, {m.from_user.first_name}! Открой магазин 👇\nЕсли есть вопросы — жми «Написать нам».", reply_markup=kb)
 
@@ -324,10 +322,8 @@ async def orders(m: Message):
     if not await is_admin(m.from_user.id): return
     os_ = await get_orders()
     if not os_: return await m.answer("Заказов нет.")
-    # Фильтр: показываем только новые
     new_orders = [o for o in os_ if o.get('status') == 'new']
-    if not new_orders:
-        return await m.answer("Нет новых заказов. Все обработаны.")
+    if not new_orders: return await m.answer("Нет новых заказов. Все обработаны.")
     for o in new_orders[:15]:
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{o['id']}:{o['user_id']}"),
@@ -374,80 +370,98 @@ HTML = r"""<!DOCTYPE html>
 <title>CLOUD99</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#1a1d16;--card:#242820;--card2:#2c3026;--olive:#4a5535;--olive2:#5d6b42;--sand:#c9b487;--accent:#8b9556;--accent2:#a8b56a;--text:#e8e6d8;--muted:#8a8a72;--sd:#0d0f0a;--sl:#363a2e;--r:14px;--danger:#a04a3a}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier New",Courier,monospace;padding-bottom:90px;min-height:100vh;background-image:linear-gradient(rgba(139,149,86,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(139,149,86,.04) 1px,transparent 1px);background-size:20px 20px}
-.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;position:sticky;top:0;background:rgba(26,29,22,.95);backdrop-filter:blur(10px);z-index:20;border-bottom:2px solid var(--olive)}
-.logo{font-weight:900;letter-spacing:3px;font-size:18px;color:var(--sand);text-transform:uppercase;text-shadow:1px 1px 0 var(--sd)}
-.logo:before{content:"◤ ";color:var(--accent2)}
-.topbar-right{display:flex;gap:8px;align-items:center}
-.profile-btn,.cart-btn{background:var(--card);padding:10px 14px;border-radius:8px;box-shadow:3px 3px 0 var(--sd);cursor:pointer;border:1px solid var(--olive);color:var(--text);font-family:inherit;font-weight:700;transition:.1s}
-.profile-btn:active,.cart-btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
-.cart-btn span{color:var(--accent2)}.badge{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:900}.cart-btn{position:relative}
-.cats{display:flex;gap:8px;overflow-x:auto;padding:14px 16px;scrollbar-width:none}.cats::-webkit-scrollbar{display:none}
-.cat{flex:0 0 auto;padding:10px 18px;border-radius:6px;background:var(--card);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer;box-shadow:3px 3px 0 var(--sd);border:1px solid var(--olive);color:var(--text);text-transform:uppercase;font-family:inherit;transition:.1s}
-.cat.active{background:var(--olive);color:var(--sand);border-color:var(--sand)}.cat:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px}
-.loader{display:flex;flex-direction:column;align-items:center;justify-content:center;height:50vh;color:var(--sand)}
-.loader-spinner{width:40px;height:40px;border:4px solid var(--olive);border-top-color:var(--sand);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:14px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.loader-text{font-size:12px;letter-spacing:2px;text-transform:uppercase;animation:pulse 1.5s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.skeleton{background:var(--card);border-radius:var(--r);padding:12px;border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px}
-.sk-img{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);animation:pulse 1.5s infinite}
-.sk-title{height:14px;width:80%;background:var(--card2);border-radius:4px;animation:pulse 1.5s infinite}
-.sk-price{height:16px;width:40%;background:var(--card2);border-radius:4px;animation:pulse 1.5s infinite}
-.sk-btn{height:36px;width:100%;background:var(--card2);border-radius:8px;animation:pulse 1.5s infinite;margin-top:auto}
-.card{background:var(--card);border-radius:var(--r);padding:12px;box-shadow:4px 4px 0 var(--sd);border:1px solid var(--olive);display:flex;flex-direction:column;gap:8px;position:relative;opacity:0;transform:translateY(10px);animation:fadeIn .3s forwards}
+:root{
+  --bg: #09141a;
+  --bg-gradient: linear-gradient(180deg, #09141a 0%, #0d2430 100%);
+  --card: rgba(255, 255, 255, 0.06);
+  --card-hover: rgba(255, 255, 255, 0.1);
+  --border: rgba(0, 240, 255, 0.15);
+  --text-main: #ffffff;
+  --text-sub: #8ab4c4;
+  --accent: #00f0ff;
+  --accent-glow: rgba(0, 240, 255, 0.3);
+  --accent-grad: linear-gradient(135deg, #00f0ff, #0077ff);
+  --font: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;font-family:var(--font)}
+html,body{margin:0;background:var(--bg);background-image:var(--bg-gradient);background-attachment:fixed;color:var(--text-main);padding-bottom:90px;min-height:100vh;overflow-x:hidden}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;position:sticky;top:0;background:rgba(9,20,26,.8);backdrop-filter:blur(15px);z-index:20;border-bottom:1px solid var(--border)}
+.logo{font-weight:900;letter-spacing:2px;font-size:22px;color:var(--accent);text-shadow:0 0 10px var(--accent-glow)}
+.topbar-right{display:flex;gap:12px;align-items:center}
+.profile-btn,.cart-btn{background:var(--card);padding:10px 16px;border-radius:12px;cursor:pointer;border:1px solid var(--border);color:var(--text-main);font-weight:700;transition:.2s;backdrop-filter:blur(5px);display:flex;align-items:center;gap:6px;box-shadow:0 2px 10px rgba(0,0,0,0.2)}
+.profile-btn:active,.cart-btn:active{transform:scale(.95);background:var(--card-hover)}
+.cart-btn span{color:var(--accent)}
+.badge{position:absolute;top:-4px;right:-4px;background:var(--accent);color:#000;border-radius:50%;width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:900;box-shadow:0 0 8px var(--accent-glow)}
+.cart-btn{position:relative}
+.cats{display:flex;gap:10px;overflow-x:auto;padding:16px 20px;scrollbar-width:none}
+.cats::-webkit-scrollbar{display:none}
+.cat{flex:0 0 auto;padding:10px 20px;border-radius:30px;background:var(--card);font-weight:600;font-size:14px;cursor:pointer;border:1px solid var(--border);color:var(--text-main);transition:.2s;backdrop-filter:blur(5px)}
+.cat.active{background:var(--accent-grad);color:#000;border-color:transparent;box-shadow:0 4px 15px var(--accent-glow);font-weight:800}
+.cat:active{transform:scale(.95)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 20px}
+.card{background:var(--card);border-radius:20px;padding:14px;border:1px solid var(--border);display:flex;flex-direction:column;gap:10px;position:relative;backdrop-filter:blur(10px);transition:.3s;opacity:0;transform:translateY(15px);animation:fadeIn .4s forwards;box-shadow:0 8px 32px rgba(0,0,0,.15)}
 @keyframes fadeIn{to{opacity:1;transform:translateY(0)}}
-.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:var(--card2);border:1px solid var(--olive)}
-.ph{width:100%;aspect-ratio:1/1;border-radius:8px;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:40px;border:1px solid var(--olive)}
-.card .t{font-size:13px;font-weight:700;line-height:1.3;min-height:34px}.card .p{font-size:15px;font-weight:900;color:var(--sand)}
-.stock{font-size:11px;color:var(--muted);margin-top:-4px}
-.btn{border:none;border-radius:8px;padding:11px 14px;font-weight:800;font-size:12px;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;font-family:inherit;transition:.1s}
-.btn.primary{background:var(--olive);color:var(--sand);border:1px solid var(--sand);box-shadow:3px 3px 0 var(--sd)}.btn.primary:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
-.btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd)}.btn.ghost:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--sd)}
-.btn.disabled{background:var(--card2);color:var(--muted);border:1px solid var(--olive);cursor:not-allowed;box-shadow:none}
+.card:active{transform:scale(.97);border-color:var(--accent);box-shadow:0 0 20px var(--accent-glow)}
+.card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:14px;background:var(--card-hover)}
+.ph{width:100%;aspect-ratio:1/1;border-radius:14px;background:var(--card-hover);display:flex;align-items:center;justify-content:center;color:var(--text-sub);font-size:40px}
+.card .t{font-size:15px;font-weight:700;line-height:1.2;min-height:36px}
+.card .p{font-size:18px;font-weight:900;color:var(--accent);text-shadow:0 0 10px var(--accent-glow)}
+.stock{font-size:12px;color:var(--text-sub);margin-top:-4px}
+.btn{border:none;border-radius:12px;padding:12px 16px;font-weight:700;font-size:13px;cursor:pointer;transition:.2s;width:100%}
+.btn.primary{background:var(--accent-grad);color:#000;box-shadow:0 4px 15px var(--accent-glow)}
+.btn.primary:active{transform:scale(.95)}
+.btn.ghost{background:var(--card);color:var(--text-main);border:1px solid var(--border)}
+.btn.disabled{background:var(--card-hover);color:var(--text-sub);cursor:not-allowed;box-shadow:none;border:1px solid transparent}
 .add{margin-top:auto}
-.modal{position:fixed;inset:0;background:rgba(10,12,8,.85);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(6px)}.modal.hidden{display:none}
-.sheet{background:var(--card);border-radius:14px 14px 0 0;padding:22px;width:100%;max-height:85vh;overflow-y:auto;border-top:3px solid var(--olive);animation:up .2s}
-@keyframes up{from{transform:translateY(40px)}to{transform:translateY(0)}}
-.sheet h2{margin:0 0 16px;font-size:18px;color:var(--sand);text-transform:uppercase;letter-spacing:2px;border-bottom:1px dashed var(--olive);padding-bottom:10px}
-.ci{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px dashed var(--olive);gap:10px}
-.ci .info{flex:1}.ci .info b{display:block;font-size:13px}.ci .info span{font-size:12px;color:var(--muted)}
-.qty{display:flex;gap:6px;align-items:center}.qty button{width:30px;height:30px;border-radius:6px;border:1px solid var(--olive);background:var(--card2);color:var(--sand);font-size:16px;font-weight:900;cursor:pointer;font-family:inherit}.qty span{min-width:20px;text-align:center;font-weight:800}
-.total{font-size:16px;margin:18px 0;padding-top:16px;border-top:2px solid var(--olive);display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:1px}.total b{color:var(--sand)}
-.discount-line{color:var(--sand);font-size:13px;margin-top:8px;padding:8px;background:var(--olive);border-radius:6px;text-transform:uppercase;letter-spacing:1px;font-weight:800}
-.empty{text-align:center;color:var(--muted);padding:40px 0;font-style:italic;animation:fadeIn .5s}
-.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--olive);color:var(--sand);padding:12px 22px;border-radius:8px;font-weight:700;z-index:200;border:1px solid var(--sand);box-shadow:3px 3px 0 var(--sd);text-transform:uppercase;font-size:12px;letter-spacing:1px;font-family:inherit;animation:fadeIn .2s}
-.profile-card{background:var(--card2);border-radius:10px;padding:16px;box-shadow:3px 3px 0 var(--sd);margin-bottom:14px;border:1px solid var(--olive)}
-.avatar{width:60px;height:60px;border-radius:50%;background:var(--olive);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:var(--sand);margin-bottom:12px;border:2px solid var(--sand);box-shadow:2px 2px 0 var(--sd);overflow:hidden}
+.modal{position:fixed;inset:0;background:rgba(9,20,26,.9);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(8px)}
+.modal.hidden{display:none}
+.sheet{background:#0d1f29;border-radius:24px 24px 0 0;padding:24px;width:100%;max-height:85vh;overflow-y:auto;border-top:2px solid var(--accent);animation:up .3s;box-shadow:0 -10px 40px rgba(0,0,0,.5)}
+@keyframes up{from{transform:translateY(50px)}to{transform:translateY(0)}}
+.sheet h2{margin:0 0 20px;font-size:20px;color:var(--text-main);font-weight:800}
+.ci{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--border);gap:12px}
+.ci .info{flex:1}
+.ci .info b{display:block;font-size:14px;color:var(--text-main)}
+.ci .info span{font-size:12px;color:var(--text-sub)}
+.qty{display:flex;gap:8px;align-items:center}
+.qty button{width:32px;height:32px;border-radius:10px;border:none;background:var(--card-hover);color:var(--accent);font-size:18px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.qty button:active{background:var(--accent);color:#000}
+.qty span{min-width:20px;text-align:center;font-weight:800;font-size:16px;color:var(--text-main)}
+.total{font-size:18px;margin:20px 0;padding-top:20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-weight:800}
+.total b{font-size:24px;color:var(--accent);text-shadow:0 0 10px var(--accent-glow)}
+.discount-line{color:#000;font-size:14px;margin-top:10px;padding:10px;background:var(--accent);border-radius:10px;font-weight:800;text-align:center;box-shadow:0 0 15px var(--accent-glow)}
+.empty{text-align:center;color:var(--text-sub);padding:50px 0;font-size:16px}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--accent-grad);color:#000;padding:14px 24px;border-radius:14px;font-weight:800;z-index:200;box-shadow:0 8px 25px var(--accent-glow);animation:fadeIn .2s;font-size:14px}
+.profile-card{background:var(--card);border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid var(--border);backdrop-filter:blur(10px)}
+.avatar{width:70px;height:70px;border-radius:50%;background:var(--accent-grad);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;color:#000;margin-bottom:16px;overflow:hidden;border:2px solid var(--accent);box-shadow:0 0 15px var(--accent-glow)}
 .avatar img{width:100%;height:100%;object-fit:cover}
-.profile-name{font-size:17px;font-weight:900;margin-bottom:4px;color:var(--sand);text-transform:uppercase;letter-spacing:1px}
-.profile-sub{color:var(--muted);font-size:12px;margin-bottom:2px;font-family:"Courier New",monospace}
-.stickers{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.sticker{width:38px;height:38px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid var(--olive);color:var(--muted);transition:.2s}
-.sticker.filled{background:var(--olive);color:var(--sand);border-color:var(--sand);box-shadow:0 0 8px rgba(139,149,86,.5);transform:scale(1.05)}
-.section-title{font-size:14px;font-weight:900;margin:20px 0 10px;color:var(--sand);text-transform:uppercase;letter-spacing:2px;border-left:3px solid var(--olive);padding-left:10px}
-.order{background:var(--card2);border-radius:8px;padding:14px;margin-bottom:10px;border:1px solid var(--olive);box-shadow:3px 3px 0 var(--sd);animation:fadeIn .3s}
-.order b{color:var(--sand)}.order .meta{color:var(--muted);font-size:11px;font-family:monospace}
-.order .status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;background:var(--olive);color:var(--sand)}
-.copy-btn{margin-top:8px;font-size:10px;padding:4px 8px;background:transparent;border:1px solid var(--muted);color:var(--muted);border-radius:4px;cursor:pointer;width:max-content}
-.copy-btn:active{background:var(--card)}
-.product-modal{position:fixed;inset:0;background:rgba(10,12,8,.95);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px}
-.pm-box{background:var(--card);border-radius:var(--r);padding:18px;max-width:400px;width:100%;border:2px solid var(--olive);box-shadow:0 0 30px rgba(0,0,0,.8);position:relative;max-height:90vh;overflow-y:auto}
-.pm-close{position:absolute;top:10px;right:14px;font-size:24px;cursor:pointer;color:var(--sand)}
-.pm-box img{width:100%;border-radius:8px;margin-bottom:12px;border:1px solid var(--olive)}
-.pm-title{font-size:18px;font-weight:900;color:var(--sand);margin-bottom:6px}
-.pm-desc{font-size:13px;color:var(--text);margin-bottom:12px;line-height:1.4}
-.pm-price{font-size:20px;font-weight:900;color:var(--accent2);margin-bottom:14px}
-.scroll-top{position:fixed;bottom:24px;right:16px;width:44px;height:44px;border-radius:50%;background:var(--olive);color:var(--sand);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:3px 3px 0 var(--sd);cursor:pointer;opacity:0;pointer-events:none;transition:.3s;z-index:50;border:1px solid var(--sand)}
+.profile-name{font-size:20px;font-weight:900;margin-bottom:6px;color:var(--text-main)}
+.profile-sub{color:var(--text-sub);font-size:13px;margin-bottom:4px}
+.stickers{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.sticker{width:42px;height:42px;border-radius:12px;background:var(--card-hover);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--text-sub);transition:.3s;border:1px solid var(--border)}
+.sticker.filled{background:var(--accent);color:#000;box-shadow:0 0 15px var(--accent-glow);transform:scale(1.05);border:none}
+.section-title{font-size:18px;font-weight:900;margin:24px 0 14px;color:var(--text-main);display:flex;align-items:center;gap:8px}
+.order{background:var(--card);border-radius:14px;padding:16px;margin-bottom:12px;border:1px solid var(--border);transition:.2s}
+.order b{color:var(--accent);font-size:15px}
+.order .meta{color:var(--text-sub);font-size:12px;margin:4px 0;display:block}
+.order .status{display:inline-block;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:800;margin-top:8px;background:var(--card-hover);text-transform:uppercase;color:var(--text-main)}
+.status.new{color:var(--accent);border:1px solid var(--accent)}
+.status.confirmed{color:#00ff88;border:1px solid #00ff88}
+.copy-btn{margin-top:10px;font-size:12px;padding:6px 12px;background:var(--card-hover);border:1px solid var(--border);color:var(--accent);border-radius:8px;cursor:pointer;font-weight:700;transition:.2s}
+.copy-btn:active{background:var(--accent);color:#000}
+.product-modal{position:fixed;inset:0;background:rgba(9,20,26,.95);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px;backdrop-filter:blur(10px)}
+.pm-box{background:#0d1f29;border-radius:20px;padding:20px;max-width:400px;width:100%;border:1px solid var(--accent);box-shadow:0 0 40px var(--accent-glow);position:relative;max-height:90vh;overflow-y:auto}
+.pm-close{position:absolute;top:12px;right:16px;font-size:24px;cursor:pointer;color:var(--text-sub);font-weight:bold}
+.pm-box img{width:100%;border-radius:12px;margin-bottom:16px;border:1px solid var(--border)}
+.pm-title{font-size:20px;font-weight:900;color:var(--text-main);margin-bottom:8px}
+.pm-desc{font-size:14px;color:var(--text-sub);margin-bottom:16px;line-height:1.5}
+.pm-price{font-size:22px;font-weight:900;color:var(--accent);margin-bottom:16px;text-shadow:0 0 10px var(--accent-glow)}
+.scroll-top{position:fixed;bottom:24px;right:16px;width:44px;height:44px;border-radius:50%;background:var(--card);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 15px rgba(0,0,0,0.3);cursor:pointer;opacity:0;pointer-events:none;transition:.3s;z-index:50;border:1px solid var(--accent);backdrop-filter:blur(5px)}
 .scroll-top.visible{opacity:1;pointer-events:auto}
 </style>
 </head>
 <body>
 <div class="topbar">
-  <div class="logo">Cloud99</div>
+  <div class="logo">CLOUD99</div>
   <div class="topbar-right">
     <div class="profile-btn" onclick="openProfile()">👤</div>
     <div class="cart-btn" onclick="openCart()">🛒 <span id="cc">0</span><div class="badge" id="cb" style="display:none">0</div></div>
@@ -455,19 +469,19 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Courier N
 </div>
 <div class="cats" id="cats"></div>
 <div class="grid" id="grid">
-    <div class="loader"><div class="loader-spinner"></div><div class="loader-text">СИНХРОНИЗАЦИЯ...</div></div>
+    <div class="loader" style="grid-column:1/-1;text-align:center;padding:50px 0"><div class="loader-spinner" style="width:40px;height:40px;border:4px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 14px"></div><div class="loader-text" style="color:var(--accent);font-size:12px;letter-spacing:2px;text-transform:uppercase;animation:pulse 1.5s infinite">СИНХРОНИЗАЦИЯ...</div></div>
 </div>
 <div class="modal hidden" id="cart" onclick="if(event.target===this)closeCart()">
   <div class="sheet">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="margin:0;border:none;padding:0">🛒 Корзина</h2>
-      <button class="btn ghost" style="padding:6px 10px;font-size:10px" onclick="clearCart()">Очистить</button>
+      <button class="btn ghost" style="padding:6px 10px;font-size:10px;width:auto" onclick="clearCart()">Очистить</button>
     </div>
     <div id="ci"></div>
     <div class="total">Итого: <b id="ct">0.00 BYN</b></div>
     <div id="discountInfo"></div>
-    <button class="btn primary" style="width:100%;padding:15px" onclick="checkout()">Оформить заказ</button>
-    <button class="btn ghost" style="width:100%;padding:12px;margin-top:8px" onclick="closeCart()">Закрыть</button>
+    <button class="btn primary" style="width:100%;padding:16px;margin-top:12px" onclick="checkout()">Оформить заказ</button>
+    <button class="btn ghost" style="width:100%;padding:12px;margin-top:10px" onclick="closeCart()">Закрыть</button>
   </div>
 </div>
 <div class="modal hidden" id="profile" onclick="if(event.target===this)closeProfile()">
@@ -500,10 +514,9 @@ async function loadCats(){
 
 async function loadProducts(){
   const g = document.getElementById('grid');
-  g.innerHTML = `<div class="loader"><div class="loader-spinner"></div><div class="loader-text">СИНХРОНИЗАЦИЯ...</div></div>`;
+  g.innerHTML = `<div class="loader" style="grid-column:1/-1;text-align:center;padding:50px 0"><div class="loader-spinner" style="width:40px;height:40px;border:4px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 14px"></div><div class="loader-text" style="color:var(--accent);font-size:12px;letter-spacing:2px;text-transform:uppercase;animation:pulse 1.5s infinite">СИНХРОНИЗАЦИЯ...</div></div>`;
   
-  // Искусственная задержка, чтобы увидеть скелетоны (для красоты)
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 300));
   
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
@@ -533,15 +546,15 @@ function openProduct(id){
     modal.innerHTML = `
       <div class="pm-box">
         <div class="pm-close" onclick="closeProductModal()">×</div>
-        ${p.image ? `<img src="/tgimg/${p.image}" alt="">` : `<div class="ph" style="margin-bottom:12px">📦</div>`}
+        ${p.image ? `<img src="/tgimg/${p.image}" alt="">` : `<div class="ph" style="margin-bottom:16px">📦</div>`}
         <div class="pm-title">${escape(p.title)}</div>
         <div class="pm-desc">${escape(p.description || 'Описание отсутствует')}</div>
         <div class="pm-price">${money(p.price)}</div>
-        <div class="stock" style="margin-bottom:12px">${p.stock > 0 ? `В наличии: ${p.stock} шт` : 'Нет в наличии'}</div>
+        <div class="stock" style="margin-bottom:16px;font-size:14px">${p.stock > 0 ? `В наличии: ${p.stock} шт` : 'Нет в наличии'}</div>
         ${p.stock > 0 
           ? `<button class="btn primary" style="width:100%" onclick="addToCart(${p.id}); closeProductModal()">В корзину</button>`
           : `<button class="btn disabled" style="width:100%">Нет в наличии</button>`}
-        <button class="btn ghost" style="width:100%;margin-top:8px" onclick="shareProduct(${p.id})">Поделиться</button>
+        <button class="btn ghost" style="width:100%;margin-top:10px" onclick="shareProduct(${p.id})">Поделиться</button>
       </div>
     `;
 }
@@ -673,7 +686,7 @@ async function openProfile(){
         <span class="meta">${o.created_at}</span><br>
         📦 ${escape(o.items)}<br>
         💰 <b>${o.total.toFixed(2)} BYN</b><br>
-        <span class="status">${statusLabel(o.status)}</span>
+        <span class="status ${o.status}">${statusLabel(o.status)}</span>
       </div>
     `).join('');
   }
@@ -684,11 +697,11 @@ async function openProfile(){
       <div class="profile-sub">@${escape(u.username || '—')}</div>
       <div class="profile-sub">ID: ${u.id}</div>
       <button class="copy-btn" onclick="copyId(${u.id})">Скопировать ID</button>
-      <div class="profile-sub" style="margin-top:8px">Подтверждённых: ${st.orders}</div>
+      <div class="profile-sub" style="margin-top:10px">Подтверждённых: ${st.orders}</div>
     </div>
     <div class="profile-card">
-      <div style="font-weight:900;color:var(--sand);text-transform:uppercase;letter-spacing:1px;font-size:13px">10 отметок = скидка 15%</div>
-      ${st.discount_active ? '<div style="color:var(--sand);font-weight:800;margin-top:6px">★ СКИДКА АКТИВНА! (от 35 BYN)</div>' : ''}
+      <div style="font-weight:900;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-size:13px">10 отметок = скидка 15%</div>
+      ${st.discount_active ? '<div style="color:var(--accent);font-weight:800;margin-top:6px">★ СКИДКА АКТИВНА! (от 35 BYN)</div>' : ''}
       <div class="stickers">${stickersHtml}</div>
     </div>
     <div class="section-title">История заказов</div>
@@ -700,7 +713,6 @@ function copyId(id){
     navigator.clipboard.writeText(id.toString()).then(() => toast('ID скопирован'));
 }
 
-// Кнопка наверх
 window.addEventListener('scroll', () => {
     const btn = document.getElementById('scrollTop');
     if (window.scrollY > 300) btn.classList.add('visible');
@@ -736,7 +748,6 @@ async def handle_order(req):
     total = data.get("total", 0); subtotal = data.get("subtotal", total)
     discount = data.get("discount", 0); used_discount = data.get("used_discount", False)
     
-    # Проверка остатков и списание
     p = await get_pool()
     async with p.connection() as conn:
         for item in items:
@@ -744,9 +755,8 @@ async def handle_order(req):
                 await cur.execute("SELECT stock FROM products WHERE id=%s", (item['id'],))
                 stock_row = await cur.fetchone()
                 if not stock_row or stock_row[0] < item['qty']:
-                    return web.json_response({"ok": False, "error": f"Товара {item['title']} не хватает на складе"}, status=400)
+                    return web.json_response({"ok": False, "error": f"Товара {item['title']} не хватает"}, status=400)
         
-        # Списываем
         for item in items:
             await conn.execute("UPDATE products SET stock = stock - %s WHERE id=%s", (item['qty'], item['id']))
         await conn.commit()

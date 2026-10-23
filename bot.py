@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 CLOUD99 — Telegram-бот + WebApp магазин.
-База данных: Supabase (PostgreSQL).
+База данных: Supabase (PostgreSQL) через psycopg.
 """
 
-import asyncio, os, logging, traceback, asyncpg
+import asyncio, os, logging, traceback
 from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
@@ -16,6 +16,8 @@ from aiogram.types import (
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.client.default import DefaultBotProperties
+import psycopg
+from psycopg_pool import AsyncConnectionPool
 
 BOT_TOKEN  = os.environ.get("BOT_TOKEN", "")
 ADMIN_ID   = int(os.environ.get("ADMIN_ID", "1218585792"))
@@ -43,13 +45,15 @@ pool = None
 async def get_pool():
     global pool
     if pool is None:
-        dsn = DATABASE_URL.replace("postgresql://", "postgres://")
-        pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+        # Заменяем префикс для psycopg
+        dsn = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+        pool = AsyncConnectionPool(dsn, min_size=1, max_size=5, open=False)
+        await pool.open()
     return pool
 
 async def init_db():
     p = await get_pool()
-    async with p.acquire() as conn:
+    async with p.connection() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS categories(
             id SERIAL PRIMARY KEY,
@@ -87,122 +91,142 @@ async def init_db():
         """)
         for t, e, s in [("ЖИДКОСТИ","💧",1), ("РАСХОДНИКИ","🔧",2), ("ПОДЫ","💨",3)]:
             await conn.execute(
-                "INSERT INTO categories(title,emoji,sort) VALUES($1,$2,$3) ON CONFLICT (title) DO NOTHING",
-                t, e, s
+                "INSERT INTO categories(title,emoji,sort) VALUES(%s,%s,%s) ON CONFLICT (title) DO NOTHING",
+                (t, e, s)
             )
-    log.info("DB initialized (Supabase)")
+        await conn.commit()
+    log.info("DB initialized (Supabase via psycopg)")
 
 async def get_categories():
     p = await get_pool()
-    async with p.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM categories ORDER BY sort, id")
-        return [dict(r) for r in rows]
+    async with p.connection() as conn:
+        async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            await cur.execute("SELECT * FROM categories ORDER BY sort, id")
+            return await cur.fetchall()
 
 async def get_products(cat_id=None):
     p = await get_pool()
-    async with p.acquire() as conn:
-        if cat_id:
-            rows = await conn.fetch("SELECT * FROM products WHERE category_id=$1 ORDER BY id DESC", cat_id)
-        else:
-            rows = await conn.fetch("SELECT * FROM products ORDER BY id DESC")
-        return [dict(r) for r in rows]
+    async with p.connection() as conn:
+        async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            if cat_id:
+                await cur.execute("SELECT * FROM products WHERE category_id=%s ORDER BY id DESC", (cat_id,))
+            else:
+                await cur.execute("SELECT * FROM products ORDER BY id DESC")
+            return await cur.fetchall()
 
 async def add_product(cat_id, title, desc, price, image):
     p = await get_pool()
-    async with p.acquire() as conn:
+    async with p.connection() as conn:
         await conn.execute(
-            "INSERT INTO products(category_id,title,description,price,image) VALUES($1,$2,$3,$4,$5)",
-            cat_id, title, desc, price, image
+            "INSERT INTO products(category_id,title,description,price,image) VALUES(%s,%s,%s,%s,%s)",
+            (cat_id, title, desc, price, image)
         )
+        await conn.commit()
 
 async def update_product(pid, field, value):
     if field not in {"title","description","price","image","category_id"}: return
     p = await get_pool()
-    async with p.acquire() as conn:
-        await conn.execute(f"UPDATE products SET {field}=$1 WHERE id=$2", value, pid)
+    async with p.connection() as conn:
+        await conn.execute(f"UPDATE products SET {field}=%s WHERE id=%s", (value, pid))
+        await conn.commit()
 
 async def delete_product(pid):
     p = await get_pool()
-    async with p.acquire() as conn:
-        await conn.execute("DELETE FROM products WHERE id=$1", pid)
+    async with p.connection() as conn:
+        await conn.execute("DELETE FROM products WHERE id=%s", (pid,))
+        await conn.commit()
 
 async def create_order(uid, uname, items, total):
     p = await get_pool()
-    async with p.acquire() as conn:
-        row = await conn.fetchrow(
-            "INSERT INTO orders(user_id,username,items,total) VALUES($1,$2,$3,$4) RETURNING id",
-            uid, uname, items, total
-        )
-        return row['id']
+    async with p.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO orders(user_id,username,items,total) VALUES(%s,%s,%s,%s) RETURNING id",
+                (uid, uname, items, total)
+            )
+            row = await cur.fetchone()
+            await conn.commit()
+            return row[0]
 
 async def update_order_status(oid, status):
     p = await get_pool()
-    async with p.acquire() as conn:
-        await conn.execute("UPDATE orders SET status=$1 WHERE id=$2", status, oid)
+    async with p.connection() as conn:
+        await conn.execute("UPDATE orders SET status=%s WHERE id=%s", (status, oid))
+        await conn.commit()
 
 async def get_orders(uid=None):
     p = await get_pool()
-    async with p.acquire() as conn:
-        if uid:
-            rows = await conn.fetch("SELECT * FROM orders WHERE user_id=$1 ORDER BY id DESC", uid)
-        else:
-            rows = await conn.fetch("SELECT * FROM orders ORDER BY id DESC")
-        return [dict(r) for r in rows]
+    async with p.connection() as conn:
+        async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            if uid:
+                await cur.execute("SELECT * FROM orders WHERE user_id=%s ORDER BY id DESC", (uid,))
+            else:
+                await cur.execute("SELECT * FROM orders ORDER BY id DESC")
+            return await cur.fetchall()
 
 async def is_admin(uid):
     if uid == ADMIN_ID: return True
     p = await get_pool()
-    async with p.acquire() as conn:
-        r = await conn.fetchrow("SELECT 1 FROM admins WHERE user_id=$1", uid)
-        return r is not None
+    async with p.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT 1 FROM admins WHERE user_id=%s", (uid,))
+            return await cur.fetchone() is not None
 
 async def add_admin(uid, uname):
     p = await get_pool()
-    async with p.acquire() as conn:
+    async with p.connection() as conn:
         await conn.execute(
-            "INSERT INTO admins(user_id,username) VALUES($1,$2) ON CONFLICT (user_id) DO NOTHING",
-            uid, uname or ""
+            "INSERT INTO admins(user_id,username) VALUES(%s,%s) ON CONFLICT (user_id) DO NOTHING",
+            (uid, uname or "")
         )
+        await conn.commit()
 
 async def get_user_stats(uid):
     p = await get_pool()
-    async with p.acquire() as conn:
-        orders_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM orders WHERE user_id=$1 AND status IN ('confirmed','shipping','ready')", uid
-        )
-        st = await conn.fetchrow("SELECT count, discount_active FROM stickers WHERE user_id=$1", uid)
-        if st:
-            stickers, discount = st["count"], st["discount_active"]
-        else:
-            stickers, discount = 0, 0
-        return {"orders": orders_count or 0, "stickers": stickers, "discount_active": bool(discount)}
+    async with p.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) FROM orders WHERE user_id=%s AND status IN ('confirmed','shipping','ready')", (uid,)
+            )
+            orders_count = (await cur.fetchone())[0]
+            
+            await cur.execute("SELECT count, discount_active FROM stickers WHERE user_id=%s", (uid,))
+            st = await cur.fetchone()
+            if st:
+                stickers, discount = st[0], st[1]
+            else:
+                stickers, discount = 0, 0
+            return {"orders": orders_count or 0, "stickers": stickers, "discount_active": bool(discount)}
 
 async def add_sticker(uid):
     p = await get_pool()
-    async with p.acquire() as conn:
-        st = await conn.fetchrow("SELECT count FROM stickers WHERE user_id=$1", uid)
-        if not st:
-            await conn.execute("INSERT INTO stickers(user_id,count) VALUES($1,1)", uid)
-            return 1, False
-        count = st["count"] + 1
-        if count >= 10:
-            await conn.execute("UPDATE stickers SET count=$1 WHERE user_id=$2", count, uid)
-            return count, True
-        await conn.execute("UPDATE stickers SET count=$1 WHERE user_id=$2", count, uid)
-        return count, False
+    async with p.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT count FROM stickers WHERE user_id=%s", (uid,))
+            st = await cur.fetchone()
+            if not st:
+                await cur.execute("INSERT INTO stickers(user_id,count) VALUES(%s,1)", (uid,))
+                await conn.commit()
+                return 1, False
+            count = st[0] + 1
+            await cur.execute("UPDATE stickers SET count=%s WHERE user_id=%s", (count, uid))
+            await conn.commit()
+            return count, count >= 10
 
 async def reset_stickers(uid):
     p = await get_pool()
-    async with p.acquire() as conn:
+    async with p.connection() as conn:
         await conn.execute("""
-            INSERT INTO stickers(user_id, count, discount_active) VALUES($1, 0, 1)
+            INSERT INTO stickers(user_id, count, discount_active) VALUES(%s, 0, 1)
             ON CONFLICT(user_id) DO UPDATE SET count=0, discount_active=1
-        """, uid)
+        """, (uid,))
+        await conn.commit()
 
 async def use_discount(uid):
     p = await get_pool()
-    async with p.acquire() as conn:
-        await conn.execute("UPDATE stickers SET discount_active=0 WHERE user_id=$1", uid)
+    async with p.connection() as conn:
+        await conn.execute("UPDATE stickers SET discount_active=0 WHERE user_id=%s", (uid,))
+        await conn.commit()
 
 # ============================================================
 #                       БОТ
@@ -572,6 +596,7 @@ const API = location.origin;
 let CATS = [], PRODUCTS = [], CART = JSON.parse(localStorage.getItem('c99')||'{}');
 let CURRENT_CAT = null, USER_DISCOUNT = false;
 const DISCOUNT_PERCENT = 15, DISCOUNT_MIN_SUM = 35;
+
 function saveCart(){ localStorage.setItem('c99', JSON.stringify(CART)); }
 function money(n){ return n.toFixed(2)+' BYN'; }
 async function api(path, opts){ const r = await fetch(API+path, opts); return r.json(); }
@@ -768,8 +793,10 @@ async def handle_order(req):
         except Exception as e: log.warning(f"notify client {uid}: {e}")
 
     p = await get_pool()
-    async with p.acquire() as conn:
-        admins = [r["user_id"] for r in await conn.fetch("SELECT user_id FROM admins")]
+    async with p.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT user_id FROM admins")
+            admins = [r[0] for r in await cur.fetchall()]
     
     disc_line = f"🎁 Скидка: −{discount:.2f} BYN\n" if discount > 0 else ""
     text = (f"🛒 <b>Новый заказ #{oid}</b>\n👤 {uname} (<code>{uid}</code>)\n📦 {items_str}\n{disc_line}💰 <b>{total:.2f} BYN</b>\n\nВыбери действие:")

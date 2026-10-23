@@ -209,6 +209,7 @@ async def cmd_help(m: Message):
         "<b>📖 Помощь CLOUD99</b>\n\n"
         "• <b>Как заказать?</b> — Открой магазин, выбери товар и нажми «В корзину», затем «Оформить заказ».\n"
         "• <b>Как получить скидку?</b> — Сделай 10 заказов, и мы активируем тебе скидку 15% на заказ от 35 BYN.\n"
+        "• <b>Колесо Фортуны?</b> — Крути раз в неделю в профиле или за заказ от 40 BYN.\n"
         "• <b>Как связаться?</b> — Нажми «Написать нам» в главном меню."
     )
 
@@ -405,7 +406,6 @@ html,body{
 .badge{position:absolute;top:-4px;right:-4px;background:var(--accent);color:#000;border-radius:50%;width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:900;box-shadow:0 0 10px var(--accent-glow)}
 .cart-btn{position:relative}
 
-/* ПОИСК */
 .search-bar{padding:0 20px 16px}
 .search-input{width:100%;padding:12px 16px;border-radius:12px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-main);font-size:14px;outline:none;backdrop-filter:blur(10px);transition:.2s}
 .search-input:focus{border-color:var(--accent);box-shadow:0 0 15px var(--accent-glow)}
@@ -433,14 +433,6 @@ html,body{
 .btn.disabled{background:rgba(255,255,255,0.05);color:var(--text-sub);cursor:not-allowed;box-shadow:none;border:1px solid transparent}
 .add{margin-top:auto}
 
-/* Скелетоны */
-.skeleton{background:var(--glass-bg);border-radius:20px;padding:14px;border:1px solid var(--glass-border);display:flex;flex-direction:column;gap:10px}
-.sk-img{width:100%;aspect-ratio:1/1;border-radius:14px;background:rgba(255,255,255,0.05);animation:pulse 1.5s infinite}
-.sk-title{height:15px;width:80%;background:rgba(255,255,255,0.05);border-radius:4px;animation:pulse 1.5s infinite}
-.sk-price{height:18px;width:40%;background:rgba(255,255,255,0.05);border-radius:4px;animation:pulse 1.5s infinite}
-.sk-btn{height:40px;width:100%;background:rgba(255,255,255,0.05);border-radius:12px;animation:pulse 1.5s infinite;margin-top:auto}
-@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
-
 .modal{position:fixed;inset:0;background:rgba(10, 22, 34, 0.7);display:flex;align-items:flex-end;justify-content:center;z-index:100;backdrop-filter:blur(10px)}
 .modal.hidden{display:none}
 .sheet{background:#0f1d2b;border-radius:24px 24px 0 0;padding:24px;width:100%;max-height:85vh;overflow-y:auto;border-top:2px solid var(--accent);animation:up .3s;box-shadow:0 -10px 50px rgba(0,0,0,.5)}
@@ -460,14 +452,6 @@ html,body{
 .empty{text-align:center;color:var(--text-sub);padding:50px 0;font-size:16px;display:flex;flex-direction:column;align-items:center;gap:16px}
 .empty-icon{font-size:64px;filter:drop-shadow(0 0 10px rgba(255,255,255,0.1))}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--accent-grad);color:#000;padding:14px 24px;border-radius:14px;font-weight:800;z-index:200;box-shadow:0 8px 25px var(--accent-glow);animation:fadeIn .2s;font-size:14px}
-
-/* Анимация корзины */
-@keyframes cartBounce {
-    0%, 100% { transform: translateY(0); }
-    30% { transform: translateY(-8px) scale(1.05); }
-    60% { transform: translateY(4px) scale(0.98); }
-}
-.cart-btn.bump { animation: cartBounce 0.4s ease; border-color: var(--accent); box-shadow: 0 0 15px var(--accent-glow); }
 
 .profile-card{background:var(--glass-bg);border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid var(--glass-border);backdrop-filter:blur(10px)}
 .avatar{width:70px;height:70px;border-radius:50%;background:var(--accent-grad);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;color:#000;margin-bottom:16px;overflow:hidden;border:2px solid var(--accent);box-shadow:0 0 15px var(--accent-glow)}
@@ -497,6 +481,11 @@ html,body{
 .pm-price{font-size:22px;font-weight:900;color:var(--accent);margin-bottom:16px;text-shadow:0 0 15px var(--accent-glow)}
 .scroll-top{position:fixed;bottom:24px;right:16px;width:44px;height:44px;border-radius:50%;background:var(--glass-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 15px rgba(0,0,0,0.3);cursor:pointer;opacity:0;pointer-events:none;transition:.3s;z-index:50;border:1px solid var(--accent);backdrop-filter:blur(10px)}
 .scroll-top.visible{opacity:1;pointer-events:auto}
+
+/* Стили для Колеса */
+.wheel-container { display: flex; flex-direction: column; align-items: center; margin-top: 10px; }
+.wheel-btn { font-size: 20px; padding: 16px; margin-top: 10px; }
+.wheel-result { font-size: 18px; font-weight: 900; color: var(--accent); margin-top: 12px; text-align: center; text-shadow: 0 0 10px var(--accent-glow); }
 </style>
 </head>
 <body>
@@ -508,7 +497,6 @@ html,body{
   </div>
 </div>
 
-<!-- Поиск -->
 <div class="search-bar">
   <input type="text" id="searchInput" class="search-input" placeholder="🔍 Поиск товара..." oninput="filterProducts()">
 </div>
@@ -534,9 +522,22 @@ html,body{
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:10px" onclick="closeCart()">Закрыть</button>
   </div>
 </div>
+
 <div class="modal hidden" id="profile" onclick="if(event.target===this)closeProfile()">
   <div class="sheet">
-    <h2>👤 Личный кабинет</h2><div id="profileContent">Загрузка...</div>
+    <h2>👤 Личный кабинет</h2>
+    <div id="profileContent">Загрузка...</div>
+    
+    <!-- Колесо Фортуны в профиле -->
+    <div class="profile-card" id="wheelCard" style="margin-top:16px;">
+        <div style="font-weight:900;color:var(--accent);font-size:16px;margin-bottom:8px;">🎰 Колесо Фортуны</div>
+        <div style="font-size:12px;color:var(--text-sub);margin-bottom:8px;">Испытай удачу раз в неделю или за заказ от 40 BYN.</div>
+        <div class="wheel-container">
+            <button class="btn primary wheel-btn" id="wheelBtn" onclick="spinWheel()">КРУТИТЬ</button>
+            <div class="wheel-result" id="wheelResult"></div>
+        </div>
+    </div>
+
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px" onclick="closeProfile()">Закрыть</button>
     <button class="btn primary" style="width:100%;padding:12px;margin-top:10px" onclick="window.open('https://t.me/ВАШ_ЮЗЕРНЕЙМ', '_blank')">💬 Написать нам</button>
   </div>
@@ -548,12 +549,74 @@ const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 const API = location.origin;
 let CATS = [], PRODUCTS = [], FILTERED = [], CART = JSON.parse(localStorage.getItem('c99')||'{}');
-let CURRENT_CAT = null, USER_DISCOUNT = false;
+let CURRENT_CAT = null, USER_DISCOUNT = false, WHEEL_DISCOUNT = 0;
 const DISCOUNT_PERCENT = 15, DISCOUNT_MIN_SUM = 35;
 
 function saveCart(){ localStorage.setItem('c99', JSON.stringify(CART)); }
 function money(n){ return n.toFixed(2)+' BYN'; }
 async function api(path, opts){ const r = await fetch(API+path, opts); return r.json(); }
+
+// --- Колесо логика ---
+function getWheelStatus() {
+    let ws = JSON.parse(localStorage.getItem('wheel_status') || '{"last_spin":0,"discount":0,"extra":0}');
+    const now = Date.now();
+    const week = 7 * 24 * 60 * 60 * 1000;
+    
+    let canSpin = false;
+    let daysLeft = 0;
+    
+    if (ws.extra > 0) canSpin = true;
+    else if (!ws.last_spin || (now - ws.last_spin) >= week) canSpin = true;
+    else {
+        const diff = week - (now - ws.last_spin);
+        daysLeft = Math.ceil(diff / (24 * 60 * 60 * 1000));
+    }
+    return { canSpin, daysLeft, discount: ws.discount, extra: ws.extra };
+}
+
+function spinWheel() {
+    const btn = document.getElementById('wheelBtn');
+    const res = document.getElementById('wheelResult');
+    const status = getWheelStatus();
+    
+    if (!status.canSpin) {
+        res.innerHTML = `⏳ Доступно через ${status.daysLeft} дн.`;
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = 'КРУТИМ...';
+    
+    setTimeout(() => {
+        let ws = JSON.parse(localStorage.getItem('wheel_status') || '{"last_spin":0,"discount":0,"extra":0}');
+        const chance = Math.random() * 100; // 0..100
+        let discount = 0;
+        
+        if (chance < 4) discount = 5;
+        else if (chance < 7) discount = 10;
+        else if (chance < 10) discount = 15;
+        
+        if (ws.extra > 0) ws.extra--;
+        else ws.last_spin = Date.now();
+        
+        ws.discount = discount;
+        localStorage.setItem('wheel_status', JSON.stringify(ws));
+        
+        btn.disabled = false;
+        btn.textContent = 'КРУТИТЬ';
+        
+        if (discount > 0) {
+            res.innerHTML = `🎉 ВЫПАЛО ${discount}%! Скидка в корзине.`;
+            WHEEL_DISCOUNT = discount;
+            toast(`Скидка ${discount}% активирована!`);
+        } else {
+            res.innerHTML = `😢 Пусто. Но мы дали вам 1 стикер ⭐`;
+            toast(`Пусто. +1 стикер!`);
+            // Здесь можно отправить запрос боту на +1 стикер, если нужно
+        }
+    }, 1500);
+}
+// -------------------
 
 async function loadCats(){
   CATS = await api('/api/categories');
@@ -569,6 +632,7 @@ async function loadProducts(){
     <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
     <div class="skeleton"><div class="sk-img"></div><div class="sk-title"></div><div class="sk-price"></div><div class="sk-btn"></div></div>
   `;
+  await new Promise(r => setTimeout(r, 800)); // Искусственная задержка для скелетонов
   
   const url = CURRENT_CAT ? '/api/products?cat='+CURRENT_CAT : '/api/products';
   PRODUCTS = await api(url);
@@ -579,7 +643,6 @@ async function loadProducts(){
 function filterProducts() {
   const query = document.getElementById('searchInput').value.toLowerCase();
   const g = document.getElementById('grid');
-  
   FILTERED = PRODUCTS.filter(p => p.title.toLowerCase().includes(query));
   
   if (!FILTERED.length){
@@ -637,7 +700,6 @@ function addToCart(id){
   if (CART[id]) CART[id].qty++; else CART[id] = {id, title:p.title, price:p.price, qty:1};
   saveCart(); updateBadge(); 
   
-  // Анимация корзины
   const cb = document.getElementById('cartBtn');
   cb.classList.remove('bump');
   void cb.offsetWidth;
@@ -660,14 +722,34 @@ async function checkDiscount(){
   if (USER_DISCOUNT) {
       document.querySelector('.profile-btn').classList.add('pulse');
   }
+  
+  // Колесо
+  const wheelBtn = document.getElementById('wheelBtn');
+  const wheelRes = document.getElementById('wheelResult');
+  const ws = getWheelStatus();
+  
+  if (!ws.canSpin) {
+      wheelBtn.disabled = true;
+      wheelBtn.classList.add('disabled');
+      wheelRes.innerHTML = `⏳ Доступно через ${ws.daysLeft} дн.`;
+  } else {
+      wheelBtn.disabled = false;
+      wheelBtn.classList.remove('disabled');
+      wheelRes.innerHTML = ws.extra > 0 ? `🎁 У вас есть ${ws.extra} доп. попытка!` : ``;
+  }
 }
 
 function calcTotals(){
   const items = Object.values(CART);
   const subtotal = items.reduce((s,i)=>s+i.price*i.qty,0);
+  
   let discount = 0;
+  const ws = getWheelStatus();
+  if (ws.discount > 0) discount += subtotal * ws.discount / 100;
+  
   const eligible = USER_DISCOUNT && subtotal >= DISCOUNT_MIN_SUM;
-  if (eligible) discount = subtotal * DISCOUNT_PERCENT / 100;
+  if (eligible) discount += subtotal * DISCOUNT_PERCENT / 100;
+  
   return {subtotal, discount, total: subtotal - discount, eligible};
 }
 
@@ -693,11 +775,19 @@ async function openCart(){
   const {subtotal, discount, total, eligible} = calcTotals();
   document.getElementById('ct').textContent = money(total);
   const info = document.getElementById('discountInfo');
+  
+  let infoHtml = '';
+  const ws = getWheelStatus();
+  if (ws.discount > 0) {
+      infoHtml += `<div class="discount-line" style="background:var(--accent);color:#000;margin-bottom:8px;">🎰 Скидка с колеса: ${ws.discount}%</div>`;
+  }
   if (USER_DISCOUNT && !eligible && items.length){
-    info.innerHTML = `<div class="discount-line">Скидка 15% активируется при заказе от ${DISCOUNT_MIN_SUM} BYN</div>`;
+    infoHtml += `<div class="discount-line">Скидка 15% активируется при заказе от ${DISCOUNT_MIN_SUM} BYN</div>`;
   } else if (eligible){
-    info.innerHTML = `<div class="discount-line">🎉 Скидка ${DISCOUNT_PERCENT}%: −${money(discount)}</div>`;
-  } else { info.innerHTML = ''; }
+    infoHtml += `<div class="discount-line">🎉 Скидка 15%: −${money(subtotal * DISCOUNT_PERCENT / 100)}</div>`;
+  }
+  info.innerHTML = infoHtml;
+  
   document.getElementById('cart').classList.remove('hidden');
 }
 function closeCart(){ document.getElementById('cart').classList.add('hidden'); }
@@ -715,12 +805,26 @@ async function checkout(){
   const items = Object.values(CART); if (!items.length) return toast('Пусто');
   const u = tg?.initDataUnsafe?.user || {id:0, username:'guest'};
   const {subtotal, discount, total, eligible} = calcTotals();
+  
+  // Очищаем скидку колеса после заказа
+  const ws = getWheelStatus();
+  if (ws.discount > 0) {
+     ws.discount = 0;
+     localStorage.setItem('wheel_status', JSON.stringify(ws));
+  }
+  
+  // Если заказ от 40, даем доп. попытку
+  if (total >= 40) {
+     ws.extra = (ws.extra || 0) + 1;
+     localStorage.setItem('wheel_status', JSON.stringify(ws));
+  }
+
   const res = await api('/api/order', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
       user_id: u.id, username: u.username || u.first_name || 'guest',
       items: items.map(i=>({id:i.id, title:i.title, qty:i.qty, price:i.price})),
-      subtotal, discount, total, used_discount: eligible
+      subtotal, discount, total, used_discount: eligible || ws.discount > 0
     })
   });
   if (res.ok){
@@ -782,6 +886,9 @@ async function openProfile(){
     <div class="section-title">История заказов</div>
     ${ordersHtml}
   `;
+  
+  // Обновляем колесо
+  checkDiscount();
 }
 function closeProfile(){ document.getElementById('profile').classList.add('hidden'); }
 function copyId(id){

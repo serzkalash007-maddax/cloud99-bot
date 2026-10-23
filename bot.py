@@ -1036,6 +1036,14 @@ async def handle_order(req):
         
         for item in items:
             await conn.execute("UPDATE products SET stock = stock - %s WHERE id=%s", (item['qty'], item['id']))
+            # Проверка остатков (уведомление если осталось 1 или 0)
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT title, stock FROM products WHERE id=%s", (item['id'],))
+                prod = await cur.fetchone()
+                if prod and prod[1] <= 1:
+                    try:
+                        await bot.send_message(ADMIN_ID, f"⚠️ <b>Последний товар!</b>\n«{prod[0]}» осталось: <b>{prod[1]} шт.</b>\nПора заказать еще!")
+                    except: pass
         await conn.commit()
 
     oid = await create_order(uid, uname, items_str, total)

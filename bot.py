@@ -232,7 +232,7 @@ async def cmd_start(m: Message, state: FSMContext):
     if m.from_user.id == ADMIN_ID: await add_admin(m.from_user.id, m.from_user.username)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=PUBLIC_URL or "https://example.com"))],
-        [InlineKeyboardButton(text="💬 Написать нам", url="https://t.me/ВАШ_ЮЗЕРНЕЙМ")] 
+        [InlineKeyboardButton(text="💬 Написать нам", url="https://t.me/fluckwh_666")] 
     ])
     await m.answer(f"<b>CLOUD99</b>\n\nПривет, {m.from_user.first_name}! Открой магазин 👇\nЕсли есть вопросы — жми «Написать нам».", reply_markup=kb)
 
@@ -261,10 +261,19 @@ async def admin_stats(m: Message):
     if not await is_admin(m.from_user.id): return
     try:
         stats = await get_admin_stats()
+        
+        # Приводим к float на всякий случай
+        t_orders = int(stats['today'][0])
+        t_sum = float(stats['today'][1])
+        w_orders = int(stats['week'][0])
+        w_sum = float(stats['week'][1])
+        m_orders = int(stats['month'][0])
+        m_sum = float(stats['month'][1])
+
         text = f"<b>📊 Статистика CLOUD99</b>\n\n"
-        text += f"<b>Сегодня:</b>\nЗаказов: {stats['today'][0]}\nВыручка: {stats['today'][1]:.2f} BYN\n\n"
-        text += f"<b>За 7 дней:</b>\nЗаказов: {stats['week'][0]}\nВыручка: {stats['week'][1]:.2f} BYN\n\n"
-        text += f"<b>За 30 дней:</b>\nЗаказов: {stats['month'][0]}\nВыручка: {stats['month'][1]:.2f} BYN\n\n"
+        text += f"<b>Сегодня:</b>\nЗаказов: {t_orders}\nВыручка: {t_sum:.2f} BYN\n\n"
+        text += f"<b>За 7 дней:</b>\nЗаказов: {w_orders}\nВыручка: {w_sum:.2f} BYN\n\n"
+        text += f"<b>За 30 дней:</b>\nЗаказов: {m_orders}\nВыручка: {m_sum:.2f} BYN\n\n"
         
         if stats['top']:
             text += "<b>🔥 Топ товаров (30 дней):</b>\n"
@@ -283,7 +292,6 @@ async def admin_export(m: Message):
         if not orders: return await m.answer("Заказов нет.")
         
         output = io.StringIO()
-        # Используем ; для Excel (русская локализация)
         writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         writer.writerow(["ID", "Дата", "Пользователь", "User ID", "Товары", "Сумма", "Статус"])
         
@@ -293,12 +301,11 @@ async def admin_export(m: Message):
                 o['created_at'].strftime("%Y-%m-%d %H:%M") if o.get('created_at') else "",
                 o['username'],
                 o['user_id'],
-                o['items'].replace(';', ','), # Заменяем ; на , внутри товаров, чтобы не ломать CSV
+                o['items'].replace(';', ','),
                 f"{o['total']:.2f}",
                 o['status']
             ])
         
-        # utf-8-sig нужен, чтобы Excel понял русские буквы
         csv_bytes = output.getvalue().encode('utf-8-sig')
         file = BufferedInputFile(csv_bytes, filename=f"orders_{m.date.strftime('%Y%m%d')}.csv")
         
@@ -644,7 +651,7 @@ html,body{
     </div>
 
     <button class="btn ghost" style="width:100%;padding:12px;margin-top:12px" onclick="closeProfile()">Закрыть</button>
-    <button class="btn primary" style="width:100%;padding:12px;margin-top:10px" onclick="window.open('https://t.me/ВАШ_ЮЗЕРНЕЙМ', '_blank')">💬 Написать нам</button>
+    <button class="btn primary" style="width:100%;padding:12px;margin-top:10px" onclick="window.open('https://t.me/fluckwh_666', '_blank')">💬 Написать нам</button>
   </div>
 </div>
 <div id="productModal" style="display:none" class="product-modal" onclick="if(event.target===this)closeProductModal()"></div>

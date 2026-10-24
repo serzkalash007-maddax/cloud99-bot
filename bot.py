@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-import asyncio, os, logging, traceback
+import asyncio, os, logging, traceback, csv, io
 from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    WebAppInfo, ReplyKeyboardMarkup, KeyboardButton
+    WebAppInfo, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
 )
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -176,6 +176,38 @@ async def use_discount(uid):
         await conn.execute("UPDATE stickers SET discount_active=0 WHERE user_id=%s", (uid,))
         await conn.commit()
 
+# --- Статистика ---
+async def get_admin_stats():
+    p = await get_pool()
+    async with p.connection() as conn:
+        async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            # За сегодня
+            await cur.execute("SELECT COUNT(*), COALESCE(SUM(total),0) FROM orders WHERE status IN ('confirmed','shipping','ready') AND created_at >= CURRENT_DATE")
+            today = await cur.fetchone()
+            # За неделю
+            await cur.execute("SELECT COUNT(*), COALESCE(SUM(total),0) FROM orders WHERE status IN ('confirmed','shipping','ready') AND created_at >= NOW() - INTERVAL '7 days'")
+            week = await cur.fetchone()
+            # За месяц
+            await cur.execute("SELECT COUNT(*), COALESCE(SUM(total),0) FROM orders WHERE status IN ('confirmed','shipping','ready') AND created_at >= NOW() - INTERVAL '30 days'")
+            month = await cur.fetchone()
+            # Топ товаров (простой парсинг items)
+            await cur.execute("SELECT items FROM orders WHERE status IN ('confirmed','shipping','ready') AND created_at >= NOW() - INTERVAL '30 days'")
+            all_items = await cur.fetchall()
+            
+            top = {}
+            for row in all_items:
+                # Ожидаем строку вида "Товар A x1; Товар B x2"
+                for part in row['items'].split(';'):
+                    part = part.strip()
+                    if ' x' in part:
+                        name, qty = part.rsplit(' x', 1)
+                        try: qty = int(qty)
+                        except: continue
+                        top[name] = top.get(name, 0) + qty
+            
+            top_sorted = sorted(top.items(), key=lambda x: x[1], reverse=True)[:5]
+            return {"today": today, "week": week, "month": month, "top": top_sorted}
+
 # ============================================================
 #                       БОТ
 # ============================================================
@@ -189,8 +221,10 @@ class EditP(StatesGroup):
 
 def admin_menu():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="➕ Добавить товар")], [KeyboardButton(text="✏️ Редактировать")],
-        [KeyboardButton(text="🗑 Удалить")], [KeyboardButton(text="📦 Заказы")], [KeyboardButton(text="⬅️ Выйти")]
+        [KeyboardButton(text="➕ Добавить товар"), KeyboardButton(text="✏️ Редактировать")],
+        [KeyboardButton(text="🗑 Удалить"), KeyboardButton(text="📦 Заказы")],
+        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="📁 Экспорт CSV")],
+        [KeyboardButton(text="⬅️ Выйти")]
     ], resize_keyboard=True)
 
 @dp.message(CommandStart())
@@ -222,6 +256,50 @@ async def cmd_admin(m: Message, state: FSMContext):
     await state.clear()
     if not await is_admin(m.from_user.id): return await m.answer("Нет доступа.")
     await m.answer("Админ-панель CLOUD99:", reply_markup=admin_menu())
+
+@dp.message(F.text == "📊 Статистика")
+async def admin_stats(m: Message):
+    if not await is_admin(m.from_user.id): return
+    stats = await get_admin_stats()
+    
+    text = f"<b>📊 Статистика CLOUD99</b>\n\n"
+    text += f"<b>Сегодня:</b>\nЗаказов: {stats['today'][0]}\nВыручка: {stats['today'][1]:.2f} BYN\n\n"
+    text += f"<b>За 7 дней:</b>\nЗаказов: {stats['week'][0]}\nВыручка: {stats['week'][1]:.2f} BYN\n\n"
+    text += f"<b>За 30 дней:</b>\nЗаказов: {stats['month'][0]}\nВыручка: {stats['month'][1]:.2f} BYN\n\n"
+    
+    if stats['top']:
+        text += "<b>🔥 Топ товаров (30 дней):</b>\n"
+        for name, qty in stats['top']:
+            text += f"• {name} — {qty} шт.\n"
+    
+    await m.answer(text)
+
+@dp.message(F.text == "📁 Экспорт CSV")
+async def admin_export(m: Message):
+    if not await is_admin(m.from_user.id): return
+    orders = await get_orders()
+    if not orders: return await m.answer("Заказов нет.")
+    
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';')
+    writer.writerow(["ID", "Дата", "Пользователь", "User ID", "Товары", "Сумма", "Статус"])
+    
+    for o in orders:
+        writer.writerow([
+            o['id'], 
+            o['created_at'].strftime("%Y-%m-%d %H:%M"),
+            o['username'],
+            o['user_id'],
+            o['items'],
+            f"{o['total']:.2f}",
+            o['status']
+        ])
+    
+    # Переводим в байты для отправки
+    csv_bytes = output.getvalue().encode('utf-8-sig') # utf-8-sig для Excel
+    file = BufferedInputFile(csv_bytes, filename=f"orders_{m.date.strftime('%Y%m%d')}.csv")
+    
+    await m.answer_document(file, caption="📁 Экспорт всех заказов в CSV (открывается в Excel).")
 
 @dp.message(Command("reset_stickers"))
 async def cmd_reset_stickers(m: Message):
